@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" fill="none">
+  <rect width="800" height="500" fill="#141414"/>
+  <path d="M160 330 L290 170 L610 170 L660 330 Z" fill="#090909" stroke="#E11D2E" stroke-width="2"/>
+  <line x1="240" y1="140" x2="360" y2="360" stroke="#FFFFFF" stroke-opacity="0.3" stroke-width="3"/>
+  <rect x="32" y="32" width="330" height="34" fill="#090909" stroke="#292929"/>
+  <text x="48" y="54" fill="#E11D2E" font-family="monospace" font-size="12" font-weight="bold" letter-spacing="2">PLACEHOLDER // WINDOW TINT STUDIO</text>
+  <text x="48" y="456" fill="#A3A3A3" font-family="monospace" font-size="12" letter-spacing="1.5">AWAITING OFFICIAL MANILA AUTO PROS PHOTOGRAPHY</text>
+</svg>
