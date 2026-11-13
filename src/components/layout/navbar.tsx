@@ -5,16 +5,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
-import {
-  MapPin,
-  Clock,
-  Menu,
-  X,
-  ArrowUpRight,
-  ShieldCheck,
-  Calendar,
-} from "lucide-react";
-import { BRAND_CONFIG, NAV_LINKS } from "@/lib/constants/site-data";
+import { Menu, X, ArrowUpRight, Calendar } from "lucide-react";
+import { NAV_LINKS } from "@/lib/constants/site-data";
 import { BrandMark } from "@/components/ui/brand-mark";
 
 gsap.registerPlugin(useGSAP);
@@ -98,53 +90,19 @@ export function Navbar() {
   return (
     <header
       ref={headerRef}
-      className={`sticky top-0 z-50 w-full transition-colors duration-300 ${
+      className={`sticky top-0 z-50 h-20 w-full border-b border-[#292929] transition-colors duration-300 ${
         isScrolled
-          ? "border-b border-[#292929] bg-[#090909]/95 backdrop-blur-md"
-          : "border-b border-[#292929]/80 bg-[#090909]"
+          ? "bg-[#090909]/95 shadow-[0_10px_30px_rgba(0,0,0,0.2)] backdrop-blur-md"
+          : "bg-[#090909]"
       }`}
     >
-      {/* Top Studio Telemetry Bar */}
-      <div className="hidden border-b border-[#292929] bg-[#141414] lg:block">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-2 text-xs text-[#A3A3A3]">
-          <div className="flex items-center gap-6">
-            <span className="inline-flex items-center gap-2 font-mono tracking-wider uppercase">
-              <MapPin className="h-3.5 w-3.5 text-[#E11D2E]" aria-hidden="true" />
-              {BRAND_CONFIG.location.fullAddress}
-            </span>
-            <span className="h-3 w-px bg-[#292929]" aria-hidden="true" />
-            <span className="inline-flex items-center gap-2 font-mono tracking-wider uppercase">
-              <Clock className="h-3.5 w-3.5 text-[#E11D2E]" aria-hidden="true" />
-              {BRAND_CONFIG.schedule.operatingDays} ({BRAND_CONFIG.schedule.closedDays})
-            </span>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <span
-              className="inline-flex items-center gap-1.5 font-mono text-[11px] tracking-wider uppercase text-white"
-              title={BRAND_CONFIG.xpelClaim.verificationNote}
-            >
-              <ShieldCheck
-                className="h-3.5 w-3.5 text-[#E11D2E]"
-                aria-hidden="true"
-              />
-              {BRAND_CONFIG.xpelClaim.text}
-              <span className="ml-1 border border-[#292929] bg-[#1C1C1C] px-1.5 py-0.5 text-[9px] text-[#A3A3A3]">
-                PENDING VERIFICATION
-              </span>
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Primary Navigation Bar */}
-      <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-4 sm:px-6">
+      <div className="mx-auto flex h-full max-w-7xl items-center justify-between px-4 sm:px-6">
         <BrandMark />
 
         {/* Desktop Navigation Links */}
         <nav
           aria-label="Primary Navigation"
-          className="hidden items-center gap-1 lg:flex"
+          className="ml-auto hidden items-center gap-0.5 xl:flex"
         >
           {NAV_LINKS.map((link) => {
             const isActive =
@@ -156,7 +114,8 @@ export function Navbar() {
               <Link
                 key={link.href}
                 href={link.href}
-                className={`group relative px-4 py-2 font-display text-base font-bold tracking-[0.12em] uppercase transition-colors duration-200 ${
+                aria-current={isActive ? "page" : undefined}
+                className={`group relative flex min-h-11 items-center px-3.5 py-2 font-sans text-[15px] font-medium tracking-[0.04em] transition-colors duration-200 xl:px-4 ${
                   isActive
                     ? "text-white"
                     : "text-[#A3A3A3] hover:text-white"
@@ -176,17 +135,11 @@ export function Navbar() {
           })}
         </nav>
 
-        {/* Desktop CTA Actions */}
-        <div className="hidden items-center gap-3 lg:flex">
-          <Link
-            href="/services"
-            className="inline-flex items-center gap-2 border border-[#292929] bg-[#141414] px-4 py-2.5 font-display text-sm font-bold tracking-[0.14em] uppercase text-white transition-colors duration-200 hover:border-white/40 hover:bg-[#1C1C1C]"
-          >
-            Explore Services
-          </Link>
+        {/* Desktop booking action */}
+        <div className="ml-4 hidden items-center xl:flex">
           <Link
             href="/booking"
-            className="group inline-flex items-center gap-2 bg-[#E11D2E] px-5 py-2.5 font-display text-sm font-bold tracking-[0.14em] uppercase text-white transition-colors duration-200 hover:bg-[#FF3045]"
+            className="group inline-flex min-h-11 items-center gap-2 whitespace-nowrap bg-[#E11D2E] px-5 py-2.5 font-sans text-sm font-bold tracking-[0.05em] text-white transition-colors duration-200 hover:bg-[#FF3045]"
           >
             <Calendar className="h-4 w-4" aria-hidden="true" />
             <span>Book Appointment</span>
@@ -204,7 +157,7 @@ export function Navbar() {
           aria-expanded={isMobileMenuOpen}
           aria-controls="mobile-navigation-drawer"
           aria-label={isMobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
-          className="inline-flex h-11 w-11 items-center justify-center border border-[#292929] bg-[#141414] text-white transition-colors hover:border-[#E11D2E] lg:hidden"
+          className="inline-flex h-11 w-11 items-center justify-center border border-[#292929] bg-[#141414] text-white transition-colors hover:border-[#E11D2E] xl:hidden"
         >
           {isMobileMenuOpen ? (
             <X className="h-5 w-5 text-[#E11D2E]" aria-hidden="true" />
@@ -219,7 +172,7 @@ export function Navbar() {
         <div
           id="mobile-navigation-drawer"
           ref={drawerRef}
-          className="fixed inset-x-0 top-20 bottom-0 z-50 flex flex-col justify-between overflow-y-auto border-t border-[#292929] bg-[#090909] px-6 py-8 lg:hidden"
+          className="fixed inset-x-0 top-20 bottom-0 z-50 flex flex-col justify-between overflow-y-auto border-t border-[#292929] bg-[#090909] px-6 py-8 xl:hidden"
         >
           <nav aria-label="Mobile Navigation" className="flex flex-col space-y-2">
             {NAV_LINKS.map((link, index) => {
@@ -234,6 +187,7 @@ export function Navbar() {
                   href={link.href}
                   data-mobile-nav-item
                   onClick={() => setIsMobileMenuOpen(false)}
+                  aria-current={isActive ? "page" : undefined}
                   className={`flex items-center justify-between border-b border-[#292929] py-4 font-display text-2xl font-extrabold tracking-[0.1em] uppercase transition-colors ${
                     isActive
                       ? "text-[#E11D2E]"
@@ -251,36 +205,17 @@ export function Navbar() {
 
           <div
             data-mobile-nav-item
-            className="mt-8 space-y-5 border-t border-[#292929] pt-6"
+            className="mt-8 border-t border-[#292929] pt-6"
           >
-            <div className="space-y-2 text-xs text-[#A3A3A3]">
-              <p className="flex items-center gap-2 font-mono uppercase text-white">
-                <MapPin className="h-4 w-4 text-[#E11D2E]" aria-hidden="true" />
-                {BRAND_CONFIG.location.fullAddress}
-              </p>
-              <p className="flex items-center gap-2 font-mono uppercase">
-                <Clock className="h-4 w-4 text-[#E11D2E]" aria-hidden="true" />
-                {BRAND_CONFIG.schedule.operatingDays} • {BRAND_CONFIG.schedule.closedDays}
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Link
-                href="/booking"
-                onClick={() => setIsMobileMenuOpen(false)}
-                className="inline-flex items-center justify-center gap-2 bg-[#E11D2E] px-5 py-3.5 font-display text-base font-bold tracking-[0.14em] uppercase text-white transition-colors hover:bg-[#FF3045]"
-              >
-                <Calendar className="h-4 w-4" aria-hidden="true" />
-                Schedule Appointment
-              </Link>
-              <Link
-                href="/contact"
-                onClick={() => setIsMobileMenuOpen(false)}
-                className="inline-flex items-center justify-center gap-2 border border-[#292929] bg-[#141414] px-5 py-3.5 font-display text-base font-bold tracking-[0.14em] uppercase text-white transition-colors hover:border-white/40"
-              >
-                Request Consultation
-              </Link>
-            </div>
+            <Link
+              href="/booking"
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="inline-flex min-h-12 w-full items-center justify-center gap-2 bg-[#E11D2E] px-5 py-3 font-sans text-[15px] font-bold tracking-[0.06em] text-white transition-colors hover:bg-[#FF3045]"
+            >
+              <Calendar className="h-4 w-4" aria-hidden="true" />
+              Book Appointment
+              <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
+            </Link>
           </div>
         </div>
       )}

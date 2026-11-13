@@ -13,6 +13,8 @@ import {
   SERVICE_CATEGORIES,
 } from "@/lib/constants/site-data";
 import { BrandMark } from "@/components/ui/brand-mark";
+import { PendingValue, XpelClaim } from "@/components/ui/dev-notice";
+import { IS_DEV_PREVIEW } from "@/lib/env/flags";
 
 export function Footer() {
   return (
@@ -21,7 +23,7 @@ export function Footer() {
       <div className="border-b border-[#292929] bg-[#141414]">
         <div className="mx-auto flex max-w-7xl flex-col items-start justify-between gap-6 px-4 py-8 sm:px-6 lg:flex-row lg:items-center">
           <div>
-            <p className="font-mono text-xs font-semibold tracking-[0.2em] uppercase text-[#E11D2E]">
+            <p className="font-mono text-[13px] font-semibold tracking-[0.1em] uppercase text-[#E11D2E]">
               QUIRICADA STREET • MANILA, PHILIPPINES
             </p>
             <p className="mt-1 font-display text-2xl font-extrabold tracking-[0.04em] uppercase text-white sm:text-3xl">
@@ -35,7 +37,7 @@ export function Footer() {
               className="group inline-flex items-center gap-2 bg-[#E11D2E] px-6 py-3.5 font-display text-sm font-bold tracking-[0.14em] uppercase text-white transition-colors hover:bg-[#FF3045]"
             >
               <Calendar className="h-4 w-4" aria-hidden="true" />
-              <span>Book Studio Slot</span>
+              <span>Book Appointment</span>
               <ArrowUpRight
                 className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
                 aria-hidden="true"
@@ -57,34 +59,39 @@ export function Footer() {
           {/* Column 1: Brand Identity & Accreditation Note */}
           <div className="lg:col-span-4">
             <BrandMark size="lg" />
-            <p className="mt-5 max-w-sm text-sm leading-relaxed text-[#A3A3A3]">
+            <p className="mt-5 max-w-sm text-base leading-[1.7] text-[#A3A3A3]">
               Dedicated automotive detailing, multi-stage paint correction,
               ceramic and graphene coatings, window solar tinting, and paint
               protection film studio serving four-wheel and two-wheel machines
               in Manila.
             </p>
 
-            <div className="mt-6 border border-[#292929] bg-[#141414] p-4">
-              <div className="flex items-start gap-2.5">
-                <ShieldCheck
-                  className="mt-0.5 h-4 w-4 shrink-0 text-[#E11D2E]"
-                  aria-hidden="true"
-                />
-                <div>
-                  <p className="font-mono text-xs font-semibold tracking-wider uppercase text-white">
-                    {BRAND_CONFIG.xpelClaim.text}
-                  </p>
-                  <p className="mt-1 text-xs leading-relaxed text-[#A3A3A3]">
-                    {BRAND_CONFIG.xpelClaim.verificationNote}
-                  </p>
+            {(BRAND_CONFIG.xpelClaim.verified || IS_DEV_PREVIEW) && (
+              <div className="mt-6 border border-[#292929] bg-[#141414] p-4">
+                <div className="flex items-start gap-2.5">
+                  <ShieldCheck
+                    className="mt-0.5 h-4 w-4 shrink-0 text-[#E11D2E]"
+                    aria-hidden="true"
+                  />
+                  <div>
+                    <div className="font-mono text-xs font-semibold tracking-wider uppercase text-white">
+                      <XpelClaim />
+                    </div>
+                    {!BRAND_CONFIG.xpelClaim.verified && (
+                      <p className="mt-1 text-xs leading-relaxed text-[#A3A3A3]">
+                        Client-supplied accreditation claim shown in draft state
+                        pending official verification prior to publication.
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Column 2: Protection & Detailing Divisions */}
           <div className="lg:col-span-3">
-            <h3 className="font-mono text-xs font-semibold tracking-[0.2em] uppercase text-[#E11D2E]">
+            <h3 className="font-mono text-[13px] font-semibold tracking-[0.1em] uppercase text-[#E11D2E]">
               SERVICE DIVISIONS
             </h3>
             <ul className="mt-5 space-y-3">
@@ -92,7 +99,7 @@ export function Footer() {
                 <li key={category.slug}>
                   <Link
                     href={`/services/${category.slug}`}
-                    className="group inline-flex items-center gap-2 text-sm text-[#A3A3A3] transition-colors hover:text-white"
+                    className="group inline-flex min-h-11 items-center gap-2 text-[15px] text-[#A3A3A3] transition-colors hover:text-white"
                   >
                     <span
                       className="h-1 w-1 bg-[#292929] transition-colors group-hover:bg-[#E11D2E]"
@@ -107,7 +114,7 @@ export function Footer() {
 
           {/* Column 3: Navigation */}
           <div className="lg:col-span-2">
-            <h3 className="font-mono text-xs font-semibold tracking-[0.2em] uppercase text-[#E11D2E]">
+            <h3 className="font-mono text-[13px] font-semibold tracking-[0.1em] uppercase text-[#E11D2E]">
               NAVIGATION
             </h3>
             <ul className="mt-5 space-y-3">
@@ -115,7 +122,7 @@ export function Footer() {
                 <li key={link.href}>
                   <Link
                     href={link.href}
-                    className="text-sm text-[#A3A3A3] transition-colors hover:text-white"
+                    className="inline-flex min-h-11 items-center text-[15px] text-[#A3A3A3] transition-colors hover:text-white"
                   >
                     {link.label}
                   </Link>
@@ -124,7 +131,7 @@ export function Footer() {
               <li>
                 <Link
                   href="/booking"
-                  className="font-semibold text-sm text-white transition-colors hover:text-[#E11D2E]"
+                  className="inline-flex min-h-11 items-center text-[15px] font-semibold text-white transition-colors hover:text-[#E11D2E]"
                 >
                   Online Booking
                 </Link>
@@ -134,10 +141,10 @@ export function Footer() {
 
           {/* Column 4: Studio Location & Operating Schedule */}
           <div className="lg:col-span-3">
-            <h3 className="font-mono text-xs font-semibold tracking-[0.2em] uppercase text-[#E11D2E]">
+            <h3 className="font-mono text-[13px] font-semibold tracking-[0.1em] uppercase text-[#E11D2E]">
               STUDIO TELEMETRY
             </h3>
-            <div className="mt-5 space-y-4 text-sm text-[#A3A3A3]">
+            <div className="mt-5 space-y-4 text-[15px] leading-relaxed text-[#A3A3A3]">
               <div className="flex items-start gap-3">
                 <MapPin
                   className="mt-0.5 h-4 w-4 shrink-0 text-[#E11D2E]"
@@ -160,8 +167,12 @@ export function Footer() {
                   <p className="text-xs text-[#E11D2E]">
                     {BRAND_CONFIG.schedule.closedDays}
                   </p>
-                  <p className="mt-1 font-mono text-[11px] text-[#A3A3A3]">
-                    {BRAND_CONFIG.schedule.hoursDefaultLabel}
+                  <p className="mt-1 text-xs">
+                    Hours:{" "}
+                    <PendingValue
+                      value={BRAND_CONFIG.schedule.hours}
+                      fallback="To be confirmed"
+                    />
                   </p>
                 </div>
               </div>

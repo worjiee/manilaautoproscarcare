@@ -7,7 +7,8 @@
   --accent-red: #E11D2E;
   --accent-red-hover: #FF3045;
   --text-primary: #FFFFFF;
-  --text-secondary: #A3A3A3;
+  --text-secondary: #B8B8B8;
+  --accent-red-text: #FF5262;
   --border-subtle: #292929;
 }
 
@@ -35,6 +36,7 @@ html {
   background-color: #090909;
   color: #FFFFFF;
   scroll-behavior: smooth;
+  scroll-padding-top: 5rem;
 }
 
 body {
@@ -42,7 +44,9 @@ body {
   color: #FFFFFF;
   font-family: var(--font-jakarta-sans), system-ui, -apple-system, sans-serif;
   overflow-x: hidden;
-  selection-background-color: #E11D2E;
+  font-size: 1rem;
+  line-height: 1.6;
+  text-rendering: optimizeLegibility;
 }
 
 ::selection {
@@ -50,12 +54,111 @@ body {
   color: #FFFFFF;
 }
 
+/* Consistent, highly visible keyboard focus indicator */
+:focus-visible {
+  outline: 3px solid var(--accent-red-text);
+  outline-offset: 3px;
+}
+
+/* Readability layer for the compact motorsport UI. These deliberately refine
+   Tailwind's smallest type utilities site-wide so cards, forms, filters, and
+   technical metadata share one accessible scale. */
+.text-sm {
+  font-size: 0.9375rem;
+  line-height: 1.55;
+}
+
+.text-xs {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.text-\[10px\],
+.text-\[11px\] {
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.text-\[\#A3A3A3\] {
+  color: var(--text-secondary);
+}
+
+.text-\[\#E11D2E\] {
+  color: var(--accent-red-text);
+}
+
+.tracking-\[0\.22em\],
+.tracking-\[0\.2em\],
+.tracking-\[0\.18em\],
+.tracking-\[0\.16em\],
+.tracking-\[0\.15em\],
+.tracking-\[0\.14em\] {
+  letter-spacing: 0.1em;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+input:not([type="checkbox"]):not([type="radio"]),
+select {
+  min-height: 44px;
+}
+
+input,
+select,
+textarea {
+  line-height: 1.5;
+}
+
+::placeholder {
+  color: #9F9F9F;
+  opacity: 1;
+}
+
 /* Subtle architectural grid background helper */
 .bg-studio-grid {
   background-size: 48px 48px;
-  background-image: 
+  background-image:
     linear-gradient(to right, rgba(41, 41, 41, 0.28) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(41, 41, 41, 0.28) 1px, transparent 1px);
+}
+
+/* Native date input icon contrast on dark backgrounds */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Motion pre-hide (see components/motion/motion-scope.tsx)                  */
+/*  Only applied when JS is running (`html.js`) and motion is allowed, so     */
+/*  no-JS and reduced-motion users always see content. `visibility` keeps     */
+/*  layout space reserved (no CLS). A failsafe reveals elements if GSAP       */
+/*  never initialises.                                                        */
+/* -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: no-preference) {
+  .js [data-motion-root] [data-animate="fade-up"],
+  .js [data-motion-root] [data-animate="mask"],
+  .js [data-motion-root] [data-animate-item],
+  .js [data-motion-root] [data-headline-line],
+  .js [data-motion-root] [data-hero-media],
+  .js [data-motion-root] [data-hero-kicker],
+  .js [data-motion-root] [data-hero-sub],
+  .js [data-motion-root] [data-hero-cta],
+  .js [data-gallery-root] [data-gallery-item] {
+    visibility: hidden;
+    animation: motion-failsafe 0s linear 2.5s forwards;
+  }
+}
+
+@keyframes motion-failsafe {
+  to {
+    visibility: visible;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

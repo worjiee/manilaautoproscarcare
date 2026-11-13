@@ -1,44 +1,57 @@
+/**
+ * MANILA AUTO PROS — Centralized public site content.
+ *
+ * Content rules:
+ * - Only client-confirmed business facts are stated as fact.
+ * - Unconfirmed values are `null` and rendered as "to be confirmed".
+ * - Unverified claims carry `verified: false` and are gated by `<DraftClaim>`.
+ * - Placeholder imagery is flagged with `isPlaceholder: true`.
+ */
+
+export type VehicleType = "Car" | "Motorcycle";
+
+export interface MediaAsset {
+  src: string;
+  alt: string;
+  /** True until the client supplies real photography for this slot. */
+  isPlaceholder: boolean;
+}
+
 export interface ServiceItem {
   id: string;
   name: string;
   shortDescription: string;
 }
 
+export interface ProcessStep {
+  title: string;
+  description: string;
+}
+
 export interface ServiceCategory {
   slug: string;
   title: string;
+  /** Numbered kicker shown above titles, e.g. "01 // PAINT PROTECTION FILM". */
   kicker: string;
   tagline: string;
-  description: string;
-  vehicleTypes: ("Car" | "Motorcycle")[];
-  featuredHighlight: string;
-  verificationNote?: string;
-  placeholderAsset: {
-    src: string;
-    alt: string;
-    aspectRatio: string;
-    caption: string;
-  };
+  summary: string;
+  description: string[];
+  seoDescription: string;
+  vehicleTypes: VehicleType[];
+  benefits: string[];
+  process: ProcessStep[];
+  relatedSlugs: string[];
+  image: MediaAsset;
   items: ServiceItem[];
 }
 
-export interface GalleryPlaceholderProject {
-  id: string;
-  title: string;
-  category: string;
-  vehicleCategory: "Car" | "Motorcycle";
-  servicePerformed: string;
-  scopeSummary: string;
-  placeholderAsset: {
-    src: string;
-    alt: string;
-    label: string;
-  };
-}
+/* -------------------------------------------------------------------------- */
+/*                               BUSINESS CONFIG                              */
+/* -------------------------------------------------------------------------- */
 
 export const BRAND_CONFIG = {
   name: "MANILA AUTO PROS",
-  shortName: "MAP",
+  displayName: "Manila Auto Pros",
   tagline: "Protect Your Investment. Preserve Your Vehicle's Beauty.",
   industry: "Premium Automotive Detailing & Paint Protection",
   location: {
@@ -47,22 +60,35 @@ export const BRAND_CONFIG = {
     country: "Philippines",
     fullAddress: "Quiricada Street, Manila, Philippines",
     timezone: "Asia/Manila",
+    mapSearchUrl:
+      "https://www.google.com/maps/search/?api=1&query=Quiricada+Street+Manila+Philippines",
   },
   schedule: {
     operatingDays: "Monday – Saturday",
     closedDays: "Sunday: Closed",
-    hoursDefaultLabel: "9:00 AM – 6:00 PM PHT (Development Default — Pending Final Client Confirmation)",
+    /** Not yet confirmed by the client. Keep `null` until supplied. */
+    hours: null as string | null,
   },
   contact: {
-    inquiryNote: "Direct phone and official email channels pending client finalization.",
-    phonePlaceholder: "+63 (02) XXXX-XXXX [Dev Placeholder]",
-    emailPlaceholder: "inquiries@manilaautopros.ph [Dev Placeholder]",
+    /** Not yet confirmed by the client. Keep `null` until supplied. */
+    phone: null as string | null,
+    email: null as string | null,
   },
+  /**
+   * Client-supplied accreditation claim. MUST be verified (certificate or
+   * XPEL dealer locator listing) before `verified` is set to `true`.
+   */
   xpelClaim: {
-    text: "Accredited XPEL Dealer & Authorized Installer",
-    verificationNote: "Draft Claim — Client-supplied accreditation status; verify official certificate before final publication.",
+    text: "Accredited XPEL Dealer & Installer",
+    verified: false,
   },
 } as const;
+
+/**
+ * Official social profiles. Intentionally empty — do not add URLs until the
+ * client confirms each account.
+ */
+export const SOCIAL_LINKS: { platform: string; href: string }[] = [];
 
 export const NAV_LINKS = [
   { label: "Home", href: "/" },
@@ -72,298 +98,410 @@ export const NAV_LINKS = [
   { label: "Contact", href: "/contact" },
 ] as const;
 
+/* -------------------------------------------------------------------------- */
+/*                                  SERVICES                                  */
+/* -------------------------------------------------------------------------- */
+
+const STANDARD_CONSULT_STEP: ProcessStep = {
+  title: "Consultation & Inspection",
+  description:
+    "We assess your vehicle's current condition, discuss how you drive and store it, and recommend the right scope. Pricing is provided per vehicle after inspection.",
+};
+
+const STANDARD_HANDOVER_STEP: ProcessStep = {
+  title: "Handover & Aftercare Guidance",
+  description:
+    "We walk you through the finished work and explain how to wash and maintain the surface so the protection performs as intended.",
+};
+
 export const SERVICE_CATEGORIES: ServiceCategory[] = [
   {
     slug: "paint-protection-film",
     title: "Paint Protection Film",
-    kicker: "01 // IMPACT & ABRASION ARMOR",
-    tagline: "Self-healing urethane barrier engineered for Manila road conditions.",
-    description:
-      "Precision-fitted Paint Protection Film (PPF) shields high-impact automotive surfaces from stone chips, road debris, swirl marks, and environmental fallout while preserving factory depth or transforming your finish.",
+    kicker: "01 // PAINT PROTECTION FILM",
+    tagline: "A physical barrier against chips, scratches, and road debris.",
+    summary:
+      "Transparent or tinted urethane film applied over painted panels to absorb the impacts that coatings alone cannot stop.",
+    description: [
+      "Paint Protection Film (PPF) is a thin, durable urethane layer installed directly over your vehicle's paint. It takes the abuse of daily driving — stone chips, light scratches, bug and tar contamination — so the factory finish underneath stays intact.",
+      "Coverage can be tailored to how you use your vehicle: high-impact zones such as the front bumper, hood, fenders, and mirrors, or complete full-body coverage. Film is available in clear gloss, black, and matte finishes, allowing you to preserve or restyle your paint.",
+    ],
+    seoDescription:
+      "XPEL Paint Protection Film installation in Manila — clear, black, and matte PPF with full-body or partial coverage at Manila Auto Pros, Quiricada Street.",
     vehicleTypes: ["Car"],
-    featuredHighlight: "Optical clarity or satin stealth finishes with edge-wrapped installation.",
-    verificationNote:
-      "Draft includes client-supplied claim as an accredited XPEL dealer/installer (pending final verification prior to launch).",
-    placeholderAsset: {
-      src: "/images/placeholders/service-ppf.svg",
-      alt: "Temporary Studio Placeholder — Paint Protection Film Application",
-      aspectRatio: "16/10",
-      caption: "PLACEHOLDER ASSET // AWAITING CLIENT STUDIO PHOTOGRAPHY (PPF BAY)",
+    benefits: [
+      "Physical protection against stone chips and road debris",
+      "Helps preserve factory paint and resale presentation",
+      "Clear, black, and matte finish options",
+      "Full-body or targeted partial coverage",
+      "Can be combined with ceramic or graphene coating",
+    ],
+    process: [
+      STANDARD_CONSULT_STEP,
+      {
+        title: "Surface Preparation",
+        description:
+          "Panels are washed and decontaminated, and paint correction is recommended where needed, so the film is applied over a clean surface.",
+      },
+      {
+        title: "Film Installation",
+        description:
+          "Film is fitted panel by panel to the agreed coverage, with careful attention to edges and contours.",
+      },
+      STANDARD_HANDOVER_STEP,
+    ],
+    relatedSlugs: ["ceramic-graphene-coating", "auto-detailing", "automotive-window-tint"],
+    image: {
+      src: "/images/dev-placeholders/service-ppf.jpg",
+      alt: "Development placeholder photo: paint protection film being applied with a squeegee",
+      isPlaceholder: true,
     },
     items: [
       {
         id: "xpel-ppf",
         name: "XPEL Paint Protection Film Installation",
-        shortDescription: "Precision-plotted and hand-tucked XPEL urethane film installation for vulnerable or complete exterior panels.",
+        shortDescription:
+          "Installation of XPEL paint protection film on selected panels or the full vehicle.",
       },
       {
         id: "clear-ppf",
         name: "Clear PPF",
-        shortDescription: "Optically transparent high-gloss film that defends factory paintwork without altering its original hue.",
+        shortDescription:
+          "Transparent gloss film that protects paint without changing its original color.",
       },
       {
         id: "black-ppf",
         name: "Black PPF",
-        shortDescription: "Deep piano-black protective urethane film ideal for roofs, accents, or dramatic two-tone styling with real impact resistance.",
+        shortDescription:
+          "Black film for roofs, trim, and accents — styling and protection in one layer.",
       },
       {
         id: "matte-ppf",
         name: "Matte PPF",
-        shortDescription: "Satin/matte conversion film that mutedly transforms gloss paint into a stealth finish or protects factory matte paint.",
+        shortDescription:
+          "Satin/matte film that gives gloss paint a stealth finish or protects factory matte paint.",
       },
       {
         id: "full-body-ppf",
         name: "Full Body PPF",
-        shortDescription: "Comprehensive bumper-to-bumper coverage encapsulating every painted exterior surface for uncompromising preservation.",
+        shortDescription: "Coverage across all painted exterior panels.",
       },
       {
         id: "partial-ppf",
         name: "Partial PPF",
-        shortDescription: "Targeted high-impact coverage for front bumpers, hoods, fenders, side mirrors, door cups, and rocker panels.",
+        shortDescription:
+          "Targeted coverage for high-impact areas such as bumpers, hoods, fenders, and mirrors.",
       },
     ],
   },
   {
     slug: "ceramic-graphene-coating",
     title: "Ceramic & Graphene Coating",
-    kicker: "02 // CHEMICAL & UV SHIELDING",
-    tagline: "Hydrophobic molecular bonding for extreme gloss and effortless maintenance.",
-    description:
-      "Advanced liquid polymer and graphene-matrix coatings that chemically bond to your vehicle's clear coat, creating a slick, UV-resistant barrier against acid rain, bird droppings, and tropical humidity.",
+    kicker: "02 // CERAMIC & GRAPHENE COATING",
+    tagline: "Deep gloss and hydrophobic protection that makes washing easier.",
+    summary:
+      "Liquid coatings that bond to your clear coat, adding gloss, water repellency, and resistance to everyday contamination.",
+    description: [
+      "Ceramic and graphene coatings form a hard, slick layer on top of your vehicle's clear coat. Water and grime have a harder time sticking, so routine washing is quicker and safer for the paint.",
+      "Coatings are applied after the paint has been properly cleaned and, where needed, enhanced by machine polishing. Multi-layer packages are available for owners who want additional coating build.",
+    ],
+    seoDescription:
+      "Ceramic coating and graphene coating in Manila — gloss enhancement, hydrophobic protection, and multi-layer packages at Manila Auto Pros.",
     vehicleTypes: ["Car"],
-    featuredHighlight: "Deep candy-like gloss retention paired with meticulous pre-coating preparation.",
-    placeholderAsset: {
-      src: "/images/placeholders/service-coating.svg",
-      alt: "Temporary Studio Placeholder — Ceramic and Graphene Coating",
-      aspectRatio: "16/10",
-      caption: "PLACEHOLDER ASSET // AWAITING CLIENT STUDIO PHOTOGRAPHY (COATING CURING BAY)",
+    benefits: [
+      "Enhanced gloss and depth of color",
+      "Hydrophobic surface that sheds water and dirt",
+      "Easier, safer routine washing",
+      "Added resistance to environmental contamination",
+      "Single or multi-layer options",
+    ],
+    process: [
+      STANDARD_CONSULT_STEP,
+      {
+        title: "Decontamination & Paint Enhancement",
+        description:
+          "The vehicle is washed and decontaminated, then machine polished as required so the coating locks in a refined finish.",
+      },
+      {
+        title: "Coating Application",
+        description:
+          "The selected ceramic or graphene coating is applied panel by panel and allowed to cure.",
+      },
+      STANDARD_HANDOVER_STEP,
+    ],
+    relatedSlugs: ["paint-protection-film", "auto-detailing", "moto-pros"],
+    image: {
+      src: "/images/dev-placeholders/service-coating.jpg",
+      alt: "Development placeholder photo: water beading on glossy coated paint",
+      isPlaceholder: true,
     },
     items: [
       {
         id: "premium-ceramic-coating",
         name: "Premium Ceramic Coating",
-        shortDescription: "High-solids SiO2 ceramic layer delivering intense water beading, chemical resistance, and lasting optical depth.",
+        shortDescription:
+          "Ceramic protection for gloss, water repellency, and easier maintenance.",
       },
       {
         id: "graphene-coating",
         name: "Graphene Coating",
-        shortDescription: "Graphene-reinforced protective matrix engineered for lower surface heat retention and enhanced water-spot resistance.",
+        shortDescription:
+          "Graphene-enhanced coating for a slick, protective, high-gloss finish.",
       },
       {
         id: "multi-layer-coating",
         name: "Multi-Layer Coating Packages",
-        shortDescription: "Stacked base and top-coat architectures tailored for discerning owners seeking maximum film build and longevity.",
+        shortDescription: "Multiple coating layers for added build and protection.",
       },
       {
         id: "paint-enhancement-protection",
         name: "Paint Enhancement and Protection",
-        shortDescription: "Single-stage refinement polish to restore clarity and gloss before locking in the finish with a dedicated protective coating.",
+        shortDescription:
+          "Polishing to restore clarity and gloss, followed by a protective coating.",
       },
     ],
   },
   {
     slug: "auto-detailing",
     title: "Auto Detailing",
-    kicker: "03 // CORRECTION & RESTORATION",
-    tagline: "Surgical surface decontamination, multi-stage paint correction, and cabin renewal.",
-    description:
-      "True protection begins with an immaculate substrate. Our detailing division utilizes calibrated lighting, safe chemical decontamination, and rotary/dual-action machine polishing to eliminate defects inside and out.",
+    kicker: "03 // AUTO DETAILING",
+    tagline: "Correction and restoration, inside and out.",
+    summary:
+      "From paint correction and machine polishing to full interior and exterior detailing — resetting your vehicle's finish and cabin.",
+    description: [
+      "Detailing goes well beyond a car wash. Paint decontamination removes bonded contaminants, while machine polishing and paint correction reduce swirl marks and light scratches to restore clarity and gloss.",
+      "Inside the cabin, interior detailing cleans and refreshes surfaces, upholstery, and trim. Detailing is also the ideal preparation step before applying a coating or paint protection film.",
+    ],
+    seoDescription:
+      "Auto detailing in Manila — full detailing, paint correction, machine polishing, decontamination, interior and exterior detailing at Manila Auto Pros.",
     vehicleTypes: ["Car"],
-    featuredHighlight: "Inspection-grade lighting and paint thickness measurement before every correction pass.",
-    placeholderAsset: {
+    benefits: [
+      "Reduces swirl marks and light scratches",
+      "Restores gloss and paint clarity",
+      "Thorough interior cleaning and refresh",
+      "Removes bonded surface contamination",
+      "Ideal preparation for coatings and PPF",
+    ],
+    process: [
+      STANDARD_CONSULT_STEP,
+      {
+        title: "Wash & Decontamination",
+        description:
+          "A careful wash followed by chemical and mechanical decontamination to remove bonded contaminants.",
+      },
+      {
+        title: "Correction & Detailing",
+        description:
+          "Machine polishing and correction as agreed, plus interior and exterior detailing within the selected scope.",
+      },
+      STANDARD_HANDOVER_STEP,
+    ],
+    relatedSlugs: ["ceramic-graphene-coating", "paint-protection-film", "automotive-window-tint"],
+    image: {
       src: "/images/placeholders/service-detailing.svg",
-      alt: "Temporary Studio Placeholder — Paint Correction and Auto Detailing",
-      aspectRatio: "16/10",
-      caption: "PLACEHOLDER ASSET // AWAITING CLIENT STUDIO PHOTOGRAPHY (CORRECTION BAY)",
+      alt: "Labeled placeholder graphic reserved for an auto detailing photo",
+      isPlaceholder: true,
     },
     items: [
       {
         id: "full-detailing",
         name: "Full Detailing",
-        shortDescription: "Complete bumper-to-bumper interior and exterior rejuvenation addressing every trim, crevice, wheel well, and cabin surface.",
+        shortDescription: "Complete interior and exterior detailing.",
       },
       {
         id: "paint-correction",
         name: "Paint Correction",
-        shortDescription: "Multi-step compounding and finishing to safely level swirl marks, holograms, oxidation, and random deep scratches.",
+        shortDescription:
+          "Multi-step polishing to reduce swirl marks, haze, and light scratches.",
       },
       {
         id: "machine-polishing",
         name: "Machine Polishing",
-        shortDescription: "Precision machine refinement to remove micro-marring and maximize specular reflection across clear-coated panels.",
+        shortDescription: "Machine refinement to enhance gloss and clarity.",
       },
       {
         id: "paint-decontamination",
         name: "Paint Decontamination",
-        shortDescription: "Chemical iron fallout removal, tar extraction, and fine-grade clay treatment to restore glass-smooth paint texture.",
+        shortDescription:
+          "Removal of iron fallout, tar, and bonded contaminants from the paint.",
       },
       {
         id: "interior-detailing",
         name: "Interior Detailing",
-        shortDescription: "Deep cleaning, steam sanitization, leather conditioning, and fabric extraction for a factory-fresh cockpit environment.",
+        shortDescription: "Deep cleaning and refresh of cabin surfaces and upholstery.",
       },
       {
         id: "exterior-detailing",
         name: "Exterior Detailing",
-        shortDescription: "pH-neutral snow foam wash, intricate emblem and grille brush work, wheel barrel cleaning, and trim dressing.",
+        shortDescription: "Detailed cleaning of paint, wheels, glass, and trim.",
       },
     ],
   },
   {
     slug: "automotive-window-tint",
     title: "Automotive Window Tint",
-    kicker: "04 // THERMAL & UV REJECTION",
-    tagline: "High-clarity solar control films built for Philippine heat and cabin privacy.",
-    description:
-      "Combat harsh tropical infrared heat and harmful UV radiation without sacrificing night-time visibility. Installed in a dust-controlled environment for clean edges and zero signal interference.",
+    kicker: "04 // AUTOMOTIVE WINDOW TINT",
+    tagline: "Cooler cabins, added privacy, and UV protection.",
+    summary:
+      "Premium window film installation with heat-rejection options for comfort and interior protection.",
+    description: [
+      "Quality window tint helps reduce heat build-up inside the cabin, cuts glare, and adds privacy — a meaningful upgrade for everyday driving in Manila's climate.",
+      "Heat-rejection films are designed to block a significant portion of solar heat and UV rays while maintaining clear visibility. We'll help you choose a film and shade that suits your vehicle and preferences.",
+    ],
+    seoDescription:
+      "Automotive window tint in Manila — premium tint installation and heat-rejection window films at Manila Auto Pros, Quiricada Street.",
     vehicleTypes: ["Car"],
-    featuredHighlight: "Infrared heat rejection and UV protection for leather, dash components, and passengers.",
-    placeholderAsset: {
+    benefits: [
+      "Helps reduce cabin heat build-up",
+      "Reduces glare for more comfortable driving",
+      "Added privacy for passengers and belongings",
+      "Helps protect interior surfaces from UV exposure",
+      "Heat-rejection film options",
+    ],
+    process: [
+      STANDARD_CONSULT_STEP,
+      {
+        title: "Film & Shade Selection",
+        description:
+          "We help you choose the film type and shade that balance heat rejection, appearance, and visibility.",
+      },
+      {
+        title: "Glass Preparation & Installation",
+        description:
+          "Glass is thoroughly cleaned, then film is cut and fitted to each window.",
+      },
+      STANDARD_HANDOVER_STEP,
+    ],
+    relatedSlugs: ["paint-protection-film", "ceramic-graphene-coating", "auto-detailing"],
+    image: {
       src: "/images/placeholders/service-tint.svg",
-      alt: "Temporary Studio Placeholder — Automotive Window Tint Installation",
-      aspectRatio: "16/10",
-      caption: "PLACEHOLDER ASSET // AWAITING CLIENT STUDIO PHOTOGRAPHY (TINT STUDIO)",
+      alt: "Labeled placeholder graphic reserved for a window tint photo",
+      isPlaceholder: true,
     },
     items: [
       {
         id: "premium-window-tint",
         name: "Premium Window Tint Installation",
-        shortDescription: "Custom-fitted window film application across windshields, side glass, and rear quarters with clean micro-edged borders.",
+        shortDescription: "Professional installation of premium automotive window film.",
       },
       {
         id: "heat-rejection-window-films",
         name: "Heat-Rejection Window Films",
-        shortDescription: "Advanced spectrally selective films engineered to reject solar heat load and block UV rays while maintaining crisp optical clarity.",
+        shortDescription:
+          "Films designed to reduce solar heat and UV while maintaining visibility.",
       },
     ],
   },
   {
     slug: "moto-pros",
     title: "Moto Pros",
-    kicker: "05 // TWO-WHEEL PROTECTION DIVISION",
-    tagline: "Dedicated detailing, PPF armor, and ceramic coatings for high-performance motorcycles.",
-    description:
-      "Motorcycles face direct exposure to road grit, knee friction on fuel tanks, and intricate engine grime. Moto Pros brings our studio-grade surface care directly to sportbikes, cruisers, adventure bikes, and scooters.",
+    kicker: "05 // MOTO PROS",
+    tagline: "Dedicated protection and detailing for motorcycles.",
+    summary:
+      "Our motorcycle division — ceramic and graphene coatings, PPF, detailing, and paint protection for two-wheel machines.",
+    description: [
+      "Motorcycles face direct exposure to road grit, weather, and wear on tanks and fairings. Moto Pros brings the same protection and detailing services we offer for cars to motorcycles.",
+      "From coating fairings and wheels to applying film on high-wear areas like the tank, we tailor the scope to your bike and how you ride.",
+    ],
+    seoDescription:
+      "Motorcycle ceramic coating, graphene coating, PPF, and detailing in Manila — Moto Pros by Manila Auto Pros.",
     vehicleTypes: ["Motorcycle"],
-    featuredHighlight: "Intricate fairing, tank, visor, and exposed mechanical assembly protection.",
-    placeholderAsset: {
+    benefits: [
+      "Protection for tanks, fairings, and painted parts",
+      "Gloss and hydrophobic coating options",
+      "Film protection for high-wear areas",
+      "Detailing for intricate components",
+      "Scope tailored to your motorcycle",
+    ],
+    process: [
+      STANDARD_CONSULT_STEP,
+      {
+        title: "Cleaning & Preparation",
+        description:
+          "The motorcycle is carefully cleaned and prepared, with attention to intricate components and finishes.",
+      },
+      {
+        title: "Protection or Detailing",
+        description:
+          "Coating, film, or detailing work is completed according to the agreed scope.",
+      },
+      STANDARD_HANDOVER_STEP,
+    ],
+    relatedSlugs: ["ceramic-graphene-coating", "paint-protection-film", "auto-detailing"],
+    image: {
       src: "/images/placeholders/service-moto.svg",
-      alt: "Temporary Studio Placeholder — Moto Pros Motorcycle Detailing & Protection",
-      aspectRatio: "16/10",
-      caption: "PLACEHOLDER ASSET // AWAITING CLIENT STUDIO PHOTOGRAPHY (MOTO PROS BAY)",
+      alt: "Labeled placeholder graphic reserved for a Moto Pros photo",
+      isPlaceholder: true,
     },
     items: [
       {
         id: "motorcycle-ceramic-coating",
         name: "Motorcycle Ceramic Coating",
-        shortDescription: "High-temperature and chemical-resistant ceramic protection for fairings, fuel tanks, wheels, and matte/gloss frames.",
+        shortDescription: "Ceramic protection for fairings, tanks, wheels, and frames.",
       },
       {
         id: "motorcycle-graphene-coating",
         name: "Motorcycle Graphene Coating",
-        shortDescription: "Graphene-infused barrier offering superior slickness, heat dissipation, and water-spotting defense for daily or weekend riders.",
+        shortDescription: "Graphene-enhanced coating for a slick, protective finish.",
       },
       {
         id: "motorcycle-ppf-installation",
         name: "Motorcycle PPF Installation",
-        shortDescription: "Tailored urethane film protection for high-wear tank sides, front cowls, headlights, and painted fenders.",
+        shortDescription: "Film protection for tanks, fairings, and other high-wear areas.",
       },
       {
         id: "motorcycle-detailing",
         name: "Motorcycle Detailing",
-        shortDescription: "Delicate hand washing, chain and sprocket degreasing, metal polishing, and multi-tool correction for compact panels.",
+        shortDescription: "Careful cleaning and detailing of paint, metal, and components.",
       },
       {
         id: "motorcycle-paint-protection",
         name: "Motorcycle Paint Protection",
-        shortDescription: "Comprehensive combination packages blending impact film on strike zones with ceramic/graphene coatings on complex bodywork.",
+        shortDescription:
+          "Combined protection packages using film and coatings for your bike.",
       },
     ],
   },
 ];
 
+export function getServiceBySlug(slug: string): ServiceCategory | undefined {
+  return SERVICE_CATEGORIES.find((service) => service.slug === slug);
+}
+
+export function getRelatedServices(service: ServiceCategory): ServiceCategory[] {
+  return service.relatedSlugs
+    .map((slug) => getServiceBySlug(slug))
+    .filter((s): s is ServiceCategory => Boolean(s));
+}
+
+/* -------------------------------------------------------------------------- */
+/*                             WHY CHOOSE (CONFIRMED)                         */
+/* -------------------------------------------------------------------------- */
+
+/** Pillars are derived strictly from client-confirmed services and policies. */
 export const WHY_CHOOSE_PILLARS = [
   {
     code: "01",
-    title: "Controlled Studio Environment",
+    title: "Protection Specialists",
     description:
-      "Film installation, paint correction, and ceramic curing require dust control and calibrated inspection lighting. Every vehicle is prepped inside our dedicated Quiricada Street facility.",
+      "Paint protection film, ceramic and graphene coatings, detailing, and window tint — complementary services under one roof on Quiricada Street.",
   },
   {
     code: "02",
     title: "Preparation Before Protection",
     description:
-      "We never seal in paint defects. Every PPF or coating commission begins with thorough chemical and mechanical decontamination so the bond is clean, durable, and optically pure.",
+      "Coatings and film perform best on properly prepared paint, which is why detailing and paint correction are offered alongside every protection service.",
   },
   {
     code: "03",
-    title: "Bespoke Fitment & Edge Care",
+    title: "Cars & Motorcycles",
     description:
-      "Where panel geometry allows, edges are carefully tucked and wrapped to minimize visible seams and resist lifting during high-pressure washes and daily Manila driving.",
+      "Our Moto Pros division brings coatings, PPF, and detailing to motorcycles, alongside our full automotive services.",
   },
   {
     code: "04",
-    title: "Four-Wheel & Two-Wheel Specialists",
+    title: "Vehicle-Specific Recommendations",
     description:
-      "Through our dedicated automotive bays and Moto Pros division, both flagship cars and motorcycles receive specialized tooling, pad sizes, and surface-specific chemistry.",
+      "Every vehicle is different. We recommend scope and provide pricing after understanding your vehicle — no one-size-fits-all packages.",
   },
 ] as const;
-
-export const FEATURED_GALLERY_PLACEHOLDERS: GalleryPlaceholderProject[] = [
-  {
-    id: "placeholder-proj-01",
-    title: "Full Body PPF & Multi-Stage Prep",
-    category: "Paint Protection Film",
-    vehicleCategory: "Car",
-    servicePerformed: "Full Body PPF + Paint Decontamination",
-    scopeSummary:
-      "Reserved slot for client project photography showing edge-wrapped urethane film installation and gloss inspection.",
-    placeholderAsset: {
-      src: "/images/placeholders/gallery-01.svg",
-      alt: "Temporary Placeholder — Full Body PPF Project Slot",
-      label: "CLIENT PHOTO SLOT 01 // FULL BODY PPF",
-    },
-  },
-  {
-    id: "placeholder-proj-02",
-    title: "Multi-Stage Paint Correction & Graphene Matrix",
-    category: "Ceramic & Graphene Coating",
-    vehicleCategory: "Car",
-    servicePerformed: "Paint Correction + Graphene Coating",
-    scopeSummary:
-      "Reserved slot for before/after defect removal under scangrip inspection lights and final cured reflection.",
-    placeholderAsset: {
-      src: "/images/placeholders/gallery-02.svg",
-      alt: "Temporary Placeholder — Paint Correction & Graphene Project Slot",
-      label: "CLIENT PHOTO SLOT 02 // GRAPHENE & CORRECTION",
-    },
-  },
-  {
-    id: "placeholder-proj-03",
-    title: "Stealth Matte PPF Conversion & Heat-Rejection Tint",
-    category: "Paint Protection Film",
-    vehicleCategory: "Car",
-    servicePerformed: "Matte PPF + Heat-Rejection Window Films",
-    scopeSummary:
-      "Reserved slot for satin/matte film transformation paired with solar-control window film installation.",
-    placeholderAsset: {
-      src: "/images/placeholders/gallery-03.svg",
-      alt: "Temporary Placeholder — Matte PPF & Window Tint Slot",
-      label: "CLIENT PHOTO SLOT 03 // MATTE PPF & TINT",
-    },
-  },
-  {
-    id: "placeholder-proj-04",
-    title: "Moto Pros Sportbike Tank PPF & Ceramic Package",
-    category: "Moto Pros",
-    vehicleCategory: "Motorcycle",
-    servicePerformed: "Motorcycle PPF Installation + Motorcycle Ceramic Coating",
-    scopeSummary:
-      "Reserved slot for two-wheel fairing correction, tank grip zone PPF, and wheel/frame ceramic protection.",
-    placeholderAsset: {
-      src: "/images/placeholders/gallery-04.svg",
-      alt: "Temporary Placeholder — Moto Pros Protection Slot",
-      label: "CLIENT PHOTO SLOT 04 // MOTO PROS DIVISION",
-    },
-  },
-];

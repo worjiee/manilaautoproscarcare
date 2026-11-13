@@ -25,7 +25,7 @@ export function BrandMark({
   return (
     <Link
       href="/"
-      className={`group inline-flex items-center gap-3 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#E11D2E] ${className}`}
+      className={`group inline-flex shrink-0 items-center gap-3 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#E11D2E] ${className}`}
       aria-label="Manila Auto Pros — Home"
     >
       {/* Geometric Motorsport Speed-Slash Emblem */}
@@ -40,12 +40,12 @@ export function BrandMark({
 
       <span className="flex flex-col leading-none">
         <span
-          className={`font-display font-extrabold tracking-[0.08em] uppercase text-white ${titleSize}`}
+          className={`whitespace-nowrap font-display font-extrabold tracking-[0.08em] uppercase text-white ${titleSize}`}
         >
           MANILA <span className="text-[#E11D2E]">AUTO PROS</span>
         </span>
         {showSubline && (
-          <span className="mt-1 font-mono text-[10px] tracking-[0.22em] uppercase text-[#A3A3A3]">
+          <span className="mt-1 hidden whitespace-nowrap font-mono text-[11px] tracking-[0.1em] uppercase text-[#A3A3A3] sm:block sm:text-xs">
             PAINT PROTECTION &amp; DETAILING STUDIO
           </span>
         )}

@@ -8,6 +8,7 @@ import "./globals.css";
 import { Navbar } from "@/components/layout/navbar";
 import { Footer } from "@/components/layout/footer";
 import { BRAND_CONFIG } from "@/lib/constants/site-data";
+import { SITE_URL } from "@/lib/env/flags";
 
 const barlowCondensed = Barlow_Condensed({
   variable: "--font-barlow-condensed",
@@ -29,11 +30,17 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: {
     default: `${BRAND_CONFIG.name} | Premium Automotive Detailing & Paint Protection in Manila`,
     template: `%s | ${BRAND_CONFIG.name}`,
   },
-  description: `${BRAND_CONFIG.tagline} Located on ${BRAND_CONFIG.location.fullAddress}. Specializing in XPEL Paint Protection Film, Ceramic & Graphene Coatings, Auto Detailing, Window Tint, and Moto Pros.`,
+  description: `${BRAND_CONFIG.tagline} Located on ${BRAND_CONFIG.location.fullAddress}. Specializing in Paint Protection Film, Ceramic & Graphene Coatings, Auto Detailing, Window Tint, and Moto Pros.`,
+  openGraph: {
+    siteName: BRAND_CONFIG.displayName,
+    locale: "en_PH",
+    type: "website",
+  },
 };
 
 export default function RootLayout({
@@ -47,8 +54,16 @@ export default function RootLayout({
       className={`${barlowCondensed.variable} ${jakartaSans.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col bg-[#090909] text-white">
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[100] focus:bg-[#E11D2E] focus:px-4 focus:py-2 focus:font-mono focus:text-xs focus:font-bold focus:tracking-wider focus:text-white focus:uppercase"
+        >
+          Skip to main content
+        </a>
         <Navbar />
-        <main className="flex-1">{children}</main>
+        <main id="main-content" className="flex-1">
+          {children}
+        </main>
         <Footer />
       </body>
     </html>
