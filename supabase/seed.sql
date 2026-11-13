@@ -2,15 +2,16 @@
 -- MANILA AUTO PROS — PHASE 3 SEED DATA (LABELED DEVELOPMENT DEFAULTS)
 -- File: supabase/seed.sql
 -- Note: Exact operating hours, service durations, bay capacity, and approval
--- rules are marked `is_dev_default = TRUE` until client confirmation.
+-- rules are marked `is_dev_default = TRUE` until client confirmation. Seeded
+-- resources and services remain inactive until explicitly reviewed and enabled.
 -- ==============================================================================
 
--- 1. Studio Bay Resource Pools (Total 5 Bays across 3 specialized pools)
+-- 1. Studio Bay Resource Pools (Total capacity: 6 across 3 specialized pools)
 INSERT INTO booking_resources (code, name, resource_type, vehicle_type, total_capacity, is_active, is_dev_default, notes)
 VALUES
-  ('BAY-PPF-COAT', 'Car PPF & Coating Cleanroom Bays', 'car_surface_protection', 'Car', 2, TRUE, TRUE, 'Dev Default: 2 dust-controlled cleanroom bays for PPF and Ceramic/Graphene coating'),
-  ('BAY-DETAIL-TINT', 'Car Detailing & Window Tint Bays', 'car_detailing_tint', 'Car', 2, TRUE, TRUE, 'Dev Default: 2 bays for correction, detailing, and window tint'),
-  ('BAY-MOTO-PROS', 'Moto Pros Two-Wheel Studio Bay', 'moto_pros_bay', 'Motorcycle', 2, TRUE, TRUE, 'Dev Default: 2 motorcycle work stands')
+  ('BAY-PPF-COAT', 'Car PPF & Coating Cleanroom Bays', 'car_surface_protection', 'Car', 2, FALSE, TRUE, 'Dev Default: 2 dust-controlled cleanroom bays for PPF and Ceramic/Graphene coating'),
+  ('BAY-DETAIL-TINT', 'Car Detailing & Window Tint Bays', 'car_detailing_tint', 'Car', 2, FALSE, TRUE, 'Dev Default: 2 bays for correction, detailing, and window tint'),
+  ('BAY-MOTO-PROS', 'Moto Pros Two-Wheel Studio Bay', 'moto_pros_bay', 'Motorcycle', 2, FALSE, TRUE, 'Dev Default: 2 motorcycle work stands')
 ON CONFLICT (code) DO NOTHING;
 
 -- 2. Business Hours (Asia/Manila: Monday–Saturday 09:00–18:00, Sunday Closed)

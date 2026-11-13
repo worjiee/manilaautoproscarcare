@@ -8,10 +8,18 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    exclude: ["src/**/*.integration.test.ts"],
+    env: {
+      BOOKING_ENABLE_IN_MEMORY_TEST_MODE: "true",
+    },
   },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      "server-only": path.resolve(
+        __dirname,
+        "./node_modules/next/dist/compiled/server-only/empty.js"
+      ),
     },
   },
 });

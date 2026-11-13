@@ -25,6 +25,7 @@ BEGIN
       'pending',
       'confirmed',
       'rejected',
+      'expired',
       'cancelled',
       'completed'
     );
@@ -43,15 +44,18 @@ $$;
 -- ------------------------------------------------------------------------------
 -- 2. UPDATED_AT TRIGGER FUNCTION
 -- ------------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION set_row_updated_at()
+CREATE OR REPLACE FUNCTION public.set_row_updated_at()
 RETURNS TRIGGER
 LANGUAGE plpgsql
+SET search_path = ''
 AS $$
 BEGIN
-  NEW.updated_at = NOW();
+  NEW.updated_at = pg_catalog.clock_timestamp();
   RETURN NEW;
 END;
 $$;
+
+REVOKE ALL ON FUNCTION public.set_row_updated_at() FROM PUBLIC, anon, authenticated;
 
 -- ------------------------------------------------------------------------------
 -- 3. TABLE: booking_resources
@@ -65,7 +69,7 @@ CREATE TABLE IF NOT EXISTS booking_resources (
   resource_type TEXT NOT NULL,
   vehicle_type vehicle_type_enum NOT NULL,
   total_capacity INTEGER NOT NULL CHECK (total_capacity >= 1 AND total_capacity <= 20),
-  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  is_active BOOLEAN NOT NULL DEFAULT FALSE,
   is_dev_default BOOLEAN NOT NULL DEFAULT TRUE,
   notes TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -99,7 +103,9 @@ CREATE TABLE IF NOT EXISTS services (
   pending_hold_minutes INTEGER NOT NULL DEFAULT 120 CHECK (pending_hold_minutes >= 15 AND pending_hold_minutes <= 10080),
   min_notice_hours INTEGER NOT NULL DEFAULT 12 CHECK (min_notice_hours >= 0 AND min_notice_hours <= 720),
   max_advance_days INTEGER NOT NULL DEFAULT 60 CHECK (max_advance_days >= 1 AND max_advance_days <= 365),
-  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  cancellation_cutoff_minutes INTEGER NOT NULL DEFAULT 0 CHECK (cancellation_cutoff_minutes >= 0 AND cancellation_cutoff_minutes <= 10080),
+  reschedule_cutoff_minutes INTEGER NOT NULL DEFAULT 0 CHECK (reschedule_cutoff_minutes >= 0 AND reschedule_cutoff_minutes <= 10080),
+  is_active BOOLEAN NOT NULL DEFAULT FALSE,
   is_dev_default BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -194,10 +200,11 @@ CREATE TABLE IF NOT EXISTS vehicles (
   vehicle_type vehicle_type_enum NOT NULL,
   manufacturer TEXT NOT NULL,
   model TEXT NOT NULL,
-  model_year SMALLINT NOT NULL CHECK (model_year >= 1950 AND model_year <= 2030),
+  model_year SMALLINT NOT NULL CHECK (model_year >= 1950),
   notes TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT uq_vehicles_id_customer UNIQUE (id, customer_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_vehicles_customer_id
@@ -214,11 +221,12 @@ CREATE TABLE IF NOT EXISTS bookings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   reference_code TEXT NOT NULL UNIQUE,
   idempotency_key TEXT NOT NULL UNIQUE,
+  request_fingerprint TEXT NOT NULL CHECK (request_fingerprint ~ '^[0-9a-f]{64}$'),
   customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
-  vehicle_id UUID NOT NULL REFERENCES vehicles(id) ON DELETE RESTRICT,
+  vehicle_id UUID NOT NULL,
   service_id UUID NOT NULL REFERENCES services(id) ON DELETE RESTRICT,
   resource_id UUID NOT NULL REFERENCES booking_resources(id) ON DELETE RESTRICT,
-  allocated_units INTEGER NOT NULL DEFAULT 1 CHECK (allocated_units >= 1),
+  allocated_units INTEGER NOT NULL DEFAULT 1 CHECK (allocated_units >= 1 AND allocated_units <= 20),
   appointment_date DATE NOT NULL,
   start_time_local TIME NOT NULL,
   end_time_local TIME NOT NULL,
@@ -235,7 +243,36 @@ CREATE TABLE IF NOT EXISTS bookings (
   rescheduled_count INTEGER NOT NULL DEFAULT 0 CHECK (rescheduled_count >= 0),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT fk_booking_vehicle_customer
+    FOREIGN KEY (vehicle_id, customer_id)
+    REFERENCES vehicles(id, customer_id)
+    ON DELETE RESTRICT,
   CONSTRAINT chk_booking_interval CHECK (end_at > start_at),
+  CONSTRAINT chk_booking_local_interval CHECK (end_time_local > start_time_local),
+  CONSTRAINT chk_booking_duration_snapshot CHECK (
+    end_at = start_at + make_interval(mins => duration_minutes)
+  ),
+  CONSTRAINT chk_booking_manila_schedule_snapshot CHECK (
+    appointment_date = (start_at AT TIME ZONE 'Asia/Manila')::DATE AND
+    start_time_local = (start_at AT TIME ZONE 'Asia/Manila')::TIME AND
+    end_time_local = (end_at AT TIME ZONE 'Asia/Manila')::TIME
+  ),
+  CONSTRAINT chk_booking_pending_expiration CHECK (
+    (status = 'pending' AND pending_expires_at IS NOT NULL) OR
+    (status <> 'pending' AND pending_expires_at IS NULL)
+  ),
+  CONSTRAINT chk_booking_cancellation_state CHECK (
+    (
+      status = 'cancelled' AND
+      cancelled_at IS NOT NULL AND
+      NULLIF(btrim(cancellation_reason), '') IS NOT NULL
+    ) OR
+    (
+      status <> 'cancelled' AND
+      cancelled_at IS NULL AND
+      cancellation_reason IS NULL
+    )
+  ),
   CONSTRAINT chk_booking_not_sunday CHECK (EXTRACT(DOW FROM appointment_date) <> 0)
 );
 
@@ -257,7 +294,7 @@ CREATE TABLE IF NOT EXISTS booking_tokens (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   booking_id UUID NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
   purpose booking_token_purpose_enum NOT NULL,
-  token_hash TEXT NOT NULL UNIQUE CHECK (char_length(token_hash) = 64),
+  token_hash TEXT NOT NULL UNIQUE CHECK (token_hash ~ '^[0-9a-f]{64}$'),
   expires_at TIMESTAMPTZ NOT NULL,
   used_at TIMESTAMPTZ,
   revoked_at TIMESTAMPTZ,
@@ -267,13 +304,17 @@ CREATE TABLE IF NOT EXISTS booking_tokens (
 CREATE INDEX IF NOT EXISTS idx_booking_tokens_booking_purpose
   ON booking_tokens (booking_id, purpose);
 
+CREATE UNIQUE INDEX IF NOT EXISTS uq_booking_tokens_one_active_purpose
+  ON booking_tokens (booking_id, purpose)
+  WHERE used_at IS NULL AND revoked_at IS NULL;
+
 -- ------------------------------------------------------------------------------
 -- 11. TABLE: booking_audit_logs
 -- Immutable audit log of all reservation lifecycle transitions.
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS booking_audit_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  booking_id UUID NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+  booking_id UUID NOT NULL REFERENCES bookings(id) ON DELETE RESTRICT,
   actor_type audit_actor_type_enum NOT NULL,
   action TEXT NOT NULL,
   previous_status booking_status_enum,
@@ -285,8 +326,93 @@ CREATE TABLE IF NOT EXISTS booking_audit_logs (
 CREATE INDEX IF NOT EXISTS idx_booking_audit_logs_booking_id
   ON booking_audit_logs (booking_id, created_at DESC);
 
+-- ------------------------------------------------------------------------------
+-- 12. BOOKING LIFECYCLE AND RELATIONSHIP GUARDS
+-- ------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.guard_vehicle_model_year()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  IF NEW.model_year > (
+    EXTRACT(
+      YEAR FROM (pg_catalog.clock_timestamp() AT TIME ZONE 'Asia/Manila')
+    )::INTEGER + 1
+  ) THEN
+    RAISE EXCEPTION 'Vehicle model year cannot be more than one year in the future.'
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.guard_vehicle_model_year()
+  FROM PUBLIC, anon, authenticated;
+
+CREATE TRIGGER trg_vehicles_model_year
+  BEFORE INSERT OR UPDATE OF model_year ON public.vehicles
+  FOR EACH ROW EXECUTE FUNCTION public.guard_vehicle_model_year();
+
+CREATE OR REPLACE FUNCTION public.guard_booking_integrity()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+DECLARE
+  v_vehicle_type public.vehicle_type_enum;
+  v_resource_type TEXT;
+  v_resource_vehicle_type public.vehicle_type_enum;
+  v_service_resource_type TEXT;
+  v_service_vehicle_type public.vehicle_type_enum;
+BEGIN
+  IF TG_OP = 'UPDATE'
+     AND OLD.status = 'pending'
+     AND (OLD.pending_expires_at IS NULL OR OLD.pending_expires_at <= pg_catalog.clock_timestamp())
+     AND NEW.status <> 'expired' THEN
+    RAISE EXCEPTION 'Expired pending bookings can only transition to expired.'
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  SELECT v.vehicle_type
+  INTO v_vehicle_type
+  FROM public.vehicles v
+  WHERE v.id = NEW.vehicle_id;
+
+  SELECT r.resource_type, r.vehicle_type
+  INTO v_resource_type, v_resource_vehicle_type
+  FROM public.booking_resources r
+  WHERE r.id = NEW.resource_id;
+
+  SELECT s.required_resource_type, s.vehicle_type
+  INTO v_service_resource_type, v_service_vehicle_type
+  FROM public.services s
+  WHERE s.id = NEW.service_id;
+
+  IF v_vehicle_type IS NULL
+     OR v_resource_type IS NULL
+     OR v_service_resource_type IS NULL
+     OR v_vehicle_type <> v_resource_vehicle_type
+     OR v_vehicle_type <> v_service_vehicle_type
+     OR v_resource_type <> v_service_resource_type THEN
+    RAISE EXCEPTION 'Booking vehicle, service, and resource are incompatible.'
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.guard_booking_integrity() FROM PUBLIC, anon, authenticated;
+
+CREATE TRIGGER trg_bookings_integrity
+  BEFORE INSERT OR UPDATE OF status, pending_expires_at, vehicle_id, service_id, resource_id
+  ON public.bookings
+  FOR EACH ROW EXECUTE FUNCTION public.guard_booking_integrity();
+
 -- ==============================================================================
--- 12. ROW LEVEL SECURITY (RLS) POLICIES
+-- 13. ROW LEVEL SECURITY (RLS) POLICIES
 -- Principle of Least Privilege:
 -- - Public/Anon can read active `services`, `business_hours`, `blocked_dates`,
 --   and `booking_resources` metadata.

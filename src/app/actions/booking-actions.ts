@@ -59,7 +59,7 @@ export async function getLiveServiceAvailabilityAction(params: {
         blockedReason: null,
         isOutOfAdvanceWindow: false,
         isDevDefaultConfig: true,
-        backendMode: "local-transactional",
+        backendMode: "supabase",
         slots: [],
         errorCode: "RATE_LIMITED",
         errorMessage:
@@ -88,7 +88,7 @@ export async function getLiveServiceAvailabilityAction(params: {
       blockedReason: null,
       isOutOfAdvanceWindow: false,
       isDevDefaultConfig: true,
-      backendMode: "local-transactional",
+      backendMode: "supabase",
       slots: [],
       errorCode: "INTERNAL_ERROR",
       errorMessage:

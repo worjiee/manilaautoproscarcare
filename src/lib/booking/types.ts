@@ -6,6 +6,7 @@ export type BookingStatus =
   | "pending"
   | "confirmed"
   | "rejected"
+  | "expired"
   | "cancelled"
   | "completed";
 
@@ -29,6 +30,10 @@ export type BookingErrorCode =
   | "INVALID_TOKEN"
   | "TOKEN_EXPIRED"
   | "TOKEN_ALREADY_USED"
+  | "PENDING_EXPIRED"
+  | "MODIFICATION_CUTOFF_REACHED"
+  | "IDEMPOTENCY_KEY_REUSED"
+  | "UNIQUE_CONFLICT"
   | "BOOKING_NOT_FOUND"
   | "INVALID_BOOKING_STATE"
   | "INTERNAL_ERROR";
@@ -60,6 +65,8 @@ export interface ServiceConfigRow {
   pendingHoldMinutes: number;
   minNoticeHours: number;
   maxAdvanceDays: number;
+  cancellationCutoffMinutes?: number;
+  rescheduleCutoffMinutes?: number;
   isActive: boolean;
   isDevDefault: boolean;
 }
@@ -110,6 +117,7 @@ export interface BookingRow {
   id: string;
   referenceCode: string;
   idempotencyKey: string;
+  requestFingerprint: string;
   customerId: string;
   vehicleId: string;
   serviceId: string;

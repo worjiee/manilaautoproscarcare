@@ -1,5 +1,7 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { createIsolatedBookingEngine } from "@/lib/booking/engine";
+import { DEFAULT_SERVICES_CONFIG } from "@/lib/booking/seed-defaults";
+import type { BookingRow, ServiceConfigRow } from "@/lib/booking/types";
 import {
   checkRateLimit,
   resetRateLimitBuckets,
@@ -654,5 +656,308 @@ describe("Manila Auto Pros — Phase 3 Real-Time Booking Engine & Security Suite
     const third = checkRateLimit({ key, maxRequests: 2, windowMs: 60_000 });
     expect(third.allowed).toBe(false);
     expect(third.remaining).toBe(0);
+  });
+
+  it("15. Serializes concurrent retries sharing one idempotency key", async () => {
+    const engine = createIsolatedBookingEngine();
+    const payload = {
+      idempotencyKey: "idem-concurrent-retry-001",
+      vehicleType: "Car" as const,
+      serviceOptionSlug: "exterior-detailing",
+      manufacturer: "Toyota",
+      model: "Supra",
+      year: 2026,
+      appointmentDate: THU_DATE,
+      startTimeLocal: "09:00",
+      customerName: "Concurrent Retry",
+      customerEmail: "retry@example.com",
+      customerPhone: "09170001001",
+      now: FIXED_NOW,
+    };
+
+    const [first, second] = await Promise.all([
+      engine.createBooking(payload),
+      engine.createBooking(payload),
+    ]);
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    if (first.ok && second.ok) {
+      expect([first.idempotentReplay, second.idempotentReplay].sort()).toEqual([
+        false,
+        true,
+      ]);
+      expect(second.booking.id).toBe(first.booking.id);
+      expect(engine.getStoredTokenHashesForBooking(first.booking.id)).toHaveLength(2);
+    }
+  });
+
+  it("16. Rejects reuse of an idempotency key with a different payload", async () => {
+    const engine = createIsolatedBookingEngine();
+    const base = {
+      idempotencyKey: "idem-payload-mismatch-001",
+      vehicleType: "Car" as const,
+      serviceOptionSlug: "interior-detailing",
+      manufacturer: "Honda",
+      model: "Civic",
+      year: 2026,
+      appointmentDate: THU_DATE,
+      startTimeLocal: "09:00",
+      customerName: "Payload Owner",
+      customerEmail: "payload@example.com",
+      customerPhone: "09170001002",
+      now: FIXED_NOW,
+    };
+
+    expect((await engine.createBooking(base)).ok).toBe(true);
+    const mismatch = await engine.createBooking({ ...base, startTimeLocal: "10:00" });
+    expect(mismatch.ok).toBe(false);
+    if (!mismatch.ok) expect(mismatch.errorCode).toBe("IDEMPOTENCY_KEY_REUSED");
+  });
+
+  it("17. Expires pending holds at the exact boundary and blocks reschedule and approval", async () => {
+    const createPending = async (engine: ReturnType<typeof createIsolatedBookingEngine>, suffix: string) =>
+      engine.createBooking({
+        idempotencyKey: `idem-expiry-${suffix}`,
+        vehicleType: "Car",
+        serviceOptionSlug: "full-body-ppf",
+        manufacturer: "Porsche",
+        model: "911",
+        year: 2026,
+        appointmentDate: FRI_DATE,
+        startTimeLocal: "09:00",
+        customerName: "Expiry Boundary",
+        customerEmail: `expiry-${suffix}@example.com`,
+        customerPhone: "09170001003",
+        now: FIXED_NOW,
+      });
+
+    const rescheduleEngine = createIsolatedBookingEngine();
+    const pending = await createPending(rescheduleEngine, "reschedule");
+    expect(pending.ok).toBe(true);
+    if (!pending.ok || !pending.tokens || !pending.booking.pendingExpiresAt) return;
+
+    const exactExpiry = new Date(pending.booking.pendingExpiresAt);
+    const reschedule = await rescheduleEngine.rescheduleByToken({
+      rawToken: pending.tokens.rescheduleToken,
+      newAppointmentDate: THU_DATE,
+      newStartTimeLocal: "09:00",
+      now: exactExpiry,
+    });
+    expect(reschedule.ok).toBe(false);
+    if (!reschedule.ok) expect(reschedule.errorCode).toBe("PENDING_EXPIRED");
+    expect(
+      rescheduleEngine.getAuditLogsForBooking(pending.booking.id).map((log) => log.action)
+    ).toContain("BOOKING_PENDING_EXPIRED");
+
+    const approvalEngine = createIsolatedBookingEngine();
+    const approvalPending = await createPending(approvalEngine, "approval");
+    expect(approvalPending.ok).toBe(true);
+    if (!approvalPending.ok || !approvalPending.booking.pendingExpiresAt) return;
+    const approval = approvalEngine.approvePendingBooking(
+      approvalPending.booking.id,
+      new Date(approvalPending.booking.pendingExpiresAt)
+    );
+    expect(approval.ok).toBe(false);
+    if (!approval.ok) expect(approval.errorCode).toBe("PENDING_EXPIRED");
+  });
+
+  it("18. Enforces configurable cancellation cutoffs before, at, and after the boundary", async () => {
+    const services = DEFAULT_SERVICES_CONFIG.map((service) => ({
+      ...service,
+      cancellationCutoffMinutes:
+        service.optionSlug === "exterior-detailing" ? 1440 : 0,
+    }));
+    const makeBooking = async (suffix: string) => {
+      const engine = createIsolatedBookingEngine({ services });
+      const created = await engine.createBooking({
+        idempotencyKey: `idem-cancel-cutoff-${suffix}`,
+        vehicleType: "Car",
+        serviceOptionSlug: "exterior-detailing",
+        manufacturer: "Toyota",
+        model: "86",
+        year: 2026,
+        appointmentDate: THU_DATE,
+        startTimeLocal: "09:00",
+        customerName: "Cutoff Tester",
+        customerEmail: `cutoff-${suffix}@example.com`,
+        customerPhone: "09170001004",
+        now: FIXED_NOW,
+      });
+      return { engine, created };
+    };
+
+    const before = await makeBooking("before");
+    if (!before.created.ok || !before.created.tokens) return;
+    expect(
+      (
+        await before.engine.cancelByToken({
+          rawToken: before.created.tokens.cancelToken,
+          now: FIXED_NOW,
+        })
+      ).ok
+    ).toBe(true);
+
+    for (const [suffix, offsetMs] of [
+      ["exact", 60 * 60_000],
+      ["after", 61 * 60_000],
+      ["started", 26 * 60 * 60_000],
+    ] as const) {
+      const scenario = await makeBooking(suffix);
+      if (!scenario.created.ok || !scenario.created.tokens) continue;
+      const result = await scenario.engine.cancelByToken({
+        rawToken: scenario.created.tokens.cancelToken,
+        now: new Date(FIXED_NOW.getTime() + offsetMs),
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.errorCode).toBe("MODIFICATION_CUTOFF_REACHED");
+    }
+  });
+
+  it("19. Rejects invalid or wrapping local times", async () => {
+    const wrappingServices = DEFAULT_SERVICES_CONFIG.map((service) =>
+      service.optionSlug === "exterior-detailing"
+        ? { ...service, durationMinutes: 1440 }
+        : service
+    );
+    const engine = createIsolatedBookingEngine({ services: wrappingServices });
+    const base = {
+      vehicleType: "Car" as const,
+      serviceOptionSlug: "exterior-detailing",
+      manufacturer: "Toyota",
+      model: "Corolla",
+      year: 2026,
+      appointmentDate: THU_DATE,
+      customerName: "Time Tester",
+      customerEmail: "time@example.com",
+      customerPhone: "09170001005",
+      now: FIXED_NOW,
+    };
+
+    const invalid = await engine.createBooking({
+      ...base,
+      idempotencyKey: "idem-invalid-time",
+      startTimeLocal: "24:00",
+    });
+    expect(invalid.ok).toBe(false);
+    if (!invalid.ok) expect(invalid.errorCode).toBe("VALIDATION_ERROR");
+
+    const wrapping = await engine.createBooking({
+      ...base,
+      idempotencyKey: "idem-wrapping-time",
+      startTimeLocal: "09:00",
+    });
+    expect(wrapping.ok).toBe(false);
+    if (!wrapping.ok) expect(wrapping.errorCode).toBe("OUTSIDE_OPERATING_HOURS");
+  });
+
+  it("20. Preserves duration, buffer, and units snapshots when service configuration changes", async () => {
+    const engine = createIsolatedBookingEngine();
+    const created = await engine.createBooking({
+      idempotencyKey: "idem-snapshot-reschedule",
+      vehicleType: "Car",
+      serviceOptionSlug: "full-body-ppf",
+      manufacturer: "Ferrari",
+      model: "Roma",
+      year: 2026,
+      appointmentDate: THU_DATE,
+      startTimeLocal: "09:00",
+      customerName: "Snapshot Tester",
+      customerEmail: "snapshot@example.com",
+      customerPhone: "09170001006",
+      now: FIXED_NOW,
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok || !created.tokens) return;
+
+    const internals = engine as unknown as {
+      services: ServiceConfigRow[];
+      bookings: BookingRow[];
+    };
+    const service = internals.services.find((row) => row.optionSlug === "full-body-ppf");
+    if (!service) throw new Error("Expected test service configuration.");
+    service.durationMinutes = 30;
+    service.bufferMinutes = 0;
+    service.requiredUnits = 1;
+
+    const rescheduled = await engine.rescheduleByToken({
+      rawToken: created.tokens.rescheduleToken,
+      newAppointmentDate: FRI_DATE,
+      newStartTimeLocal: "09:00",
+      now: FIXED_NOW,
+    });
+    expect(rescheduled.ok).toBe(true);
+    if (rescheduled.ok) {
+      expect(rescheduled.endTimeLocal).toBe("17:00");
+      expect(created.booking.durationMinutes).toBe(480);
+      expect(created.booking.allocatedUnits).toBe(2);
+      const storedBooking = internals.bookings.find(
+        (row) => row.id === created.booking.id
+      );
+      expect(storedBooking?.durationMinutes).toBe(480);
+      expect(storedBooking?.bufferMinutes).toBe(30);
+      expect(storedBooking?.allocatedUnits).toBe(2);
+      expect(
+        engine
+          .getStoredTokenHashesForBooking(created.booking.id)
+          .filter((token) => !token.usedAt && !token.revokedAt)
+      ).toHaveLength(2);
+    }
+  });
+
+  it("21. Enforces rescheduling cutoffs before, at, and after the boundary", async () => {
+    const services = DEFAULT_SERVICES_CONFIG.map((service) => ({
+      ...service,
+      rescheduleCutoffMinutes:
+        service.optionSlug === "exterior-detailing" ? 1440 : 0,
+    }));
+    const makeBooking = async (suffix: string) => {
+      const engine = createIsolatedBookingEngine({ services });
+      const created = await engine.createBooking({
+        idempotencyKey: `idem-reschedule-cutoff-${suffix}`,
+        vehicleType: "Car",
+        serviceOptionSlug: "exterior-detailing",
+        manufacturer: "Mazda",
+        model: "MX-5",
+        year: 2026,
+        appointmentDate: THU_DATE,
+        startTimeLocal: "09:00",
+        customerName: "Reschedule Cutoff",
+        customerEmail: `reschedule-cutoff-${suffix}@example.com`,
+        customerPhone: "09170001007",
+        now: FIXED_NOW,
+      });
+      return { engine, created };
+    };
+
+    const before = await makeBooking("before");
+    if (!before.created.ok || !before.created.tokens) return;
+    expect(
+      (
+        await before.engine.rescheduleByToken({
+          rawToken: before.created.tokens.rescheduleToken,
+          newAppointmentDate: FRI_DATE,
+          newStartTimeLocal: "09:00",
+          now: FIXED_NOW,
+        })
+      ).ok
+    ).toBe(true);
+
+    for (const [suffix, offsetMs] of [
+      ["exact", 60 * 60_000],
+      ["after", 61 * 60_000],
+      ["started", 26 * 60 * 60_000],
+    ] as const) {
+      const scenario = await makeBooking(suffix);
+      if (!scenario.created.ok || !scenario.created.tokens) continue;
+      const result = await scenario.engine.rescheduleByToken({
+        rawToken: scenario.created.tokens.rescheduleToken,
+        newAppointmentDate: FRI_DATE,
+        newStartTimeLocal: "09:00",
+        now: new Date(FIXED_NOW.getTime() + offsetMs),
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.errorCode).toBe("MODIFICATION_CUTOFF_REACHED");
+    }
   });
 });

@@ -1,13 +1,17 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   generateBookingReference,
   generateBookingToken,
   hashBookingToken,
 } from "@/lib/security/tokens";
 import {
-  getSupabaseServiceRoleClient,
-  isSupabaseConfigured,
+  getRequiredSupabaseServiceRoleClient,
 } from "@/lib/supabase/server";
+import {
+  getSupabaseAvailability,
+  getSupabaseBookingContext,
+  inspectSupabaseBookingToken,
+} from "./supabase-persistence";
 import {
   DEFAULT_BOOKING_RESOURCES,
   DEFAULT_BUSINESS_HOURS,
@@ -87,6 +91,12 @@ export function toManilaDateString(date: Date): string {
   }).format(date);
 }
 
+function isValidLocalTime(value: string | undefined): value is string {
+  if (!value || !/^\d{2}:\d{2}$/.test(value)) return false;
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59;
+}
+
 /* -------------------------------------------------------------------------- */
 /*                          SERVER-SIDE VALIDATION                            */
 /* -------------------------------------------------------------------------- */
@@ -117,8 +127,15 @@ export function validateBookingSubmissionInput(
   }
 
   const year = Number(input.year);
-  if (!Number.isInteger(year) || year < 1950 || year > 2030) {
-    fieldErrors.year = "Model year must be between 1950 and 2030.";
+  const maximumModelYear =
+    Number(
+      new Intl.DateTimeFormat("en", {
+        timeZone: "Asia/Manila",
+        year: "numeric",
+      }).format(new Date())
+    ) + 1;
+  if (!Number.isInteger(year) || year < 1950 || year > maximumModelYear) {
+    fieldErrors.year = `Model year must be between 1950 and ${maximumModelYear}.`;
   }
 
   if (
@@ -128,10 +145,7 @@ export function validateBookingSubmissionInput(
     fieldErrors.appointmentDate = "Valid appointment date (YYYY-MM-DD) is required.";
   }
 
-  if (
-    !input.startTimeLocal ||
-    !/^\d{2}:\d{2}$/.test(input.startTimeLocal)
-  ) {
+  if (!isValidLocalTime(input.startTimeLocal)) {
     fieldErrors.startTimeLocal = "Valid start time (HH:MM) is required.";
   }
 
@@ -161,6 +175,24 @@ export function validateBookingSubmissionInput(
   return null;
 }
 
+function createBookingRequestFingerprint(input: CreateBookingInput): string {
+  const material = {
+    optionSlug: input.serviceOptionSlug.trim(),
+    vehicleType: input.vehicleType,
+    manufacturer: input.manufacturer.trim(),
+    model: input.model.trim(),
+    modelYear: Number(input.year),
+    vehicleNotes: input.vehicleNotes?.trim() ?? "",
+    appointmentDate: input.appointmentDate,
+    startTimeLocal: input.startTimeLocal,
+    customerName: input.customerName.trim(),
+    customerEmail: input.customerEmail.trim().toLowerCase(),
+    customerPhone: input.customerPhone.replace(/\D/g, ""),
+    additionalRequests: input.additionalRequests?.trim() ?? "",
+  };
+  return createHash("sha256").update(JSON.stringify(material)).digest("hex");
+}
+
 /* -------------------------------------------------------------------------- */
 /*                  TRANSACTIONAL BOOKING ENGINE IMPLEMENTATION               */
 /* -------------------------------------------------------------------------- */
@@ -173,6 +205,7 @@ const PUBLIC_READABLE_TABLES = new Set([
 ]);
 
 export class BookingEngine {
+  private readonly persistenceMode: "supabase" | "memory-test";
   private resources: BookingResourceRow[];
   private services: ServiceConfigRow[];
   private businessHours: BusinessHoursRow[];
@@ -191,7 +224,20 @@ export class BookingEngine {
     services?: ServiceConfigRow[];
     businessHours?: BusinessHoursRow[];
     blockedDates?: BlockedDateRow[];
+    persistenceMode?: "supabase" | "memory-test";
   }) {
+    this.persistenceMode = options?.persistenceMode ?? "supabase";
+    if (
+      this.persistenceMode === "memory-test" &&
+      !(
+        process.env.NODE_ENV === "test" &&
+        process.env.BOOKING_ENABLE_IN_MEMORY_TEST_MODE === "true"
+      )
+    ) {
+      throw new Error(
+        "In-memory booking persistence is restricted to explicitly enabled tests."
+      );
+    }
     this.resources = structuredClone(
       options?.resources ?? DEFAULT_BOOKING_RESOURCES
     );
@@ -274,6 +320,73 @@ export class BookingEngine {
     return this.tokens.filter((t) => t.bookingId === bookingId);
   }
 
+  private expirePendingBooking(booking: BookingRow, now: Date): boolean {
+    if (
+      booking.status !== "pending" ||
+      !booking.pendingExpiresAt ||
+      new Date(booking.pendingExpiresAt).getTime() > now.getTime()
+    ) {
+      return false;
+    }
+
+    booking.status = "expired";
+    booking.pendingExpiresAt = null;
+    booking.updatedAt = now.toISOString();
+    for (const token of this.tokens) {
+      if (
+        token.bookingId === booking.id &&
+        !token.usedAt &&
+        !token.revokedAt
+      ) {
+        token.revokedAt = now.toISOString();
+      }
+    }
+    this.auditLogs.push({
+      id: randomUUID(),
+      bookingId: booking.id,
+      actorType: "system",
+      action: "BOOKING_PENDING_EXPIRED",
+      previousStatus: "pending",
+      newStatus: "expired",
+      metadata: { expiredAt: now.toISOString() },
+      createdAt: now.toISOString(),
+    });
+    return true;
+  }
+
+  /** Test-only model of the future admin approval boundary. */
+  public approvePendingBooking(
+    bookingId: string,
+    now: Date
+  ): { ok: true } | BookingFailure {
+    const booking = this.bookings.find((row) => row.id === bookingId);
+    if (!booking) {
+      return {
+        ok: false,
+        errorCode: "BOOKING_NOT_FOUND",
+        message: "Booking record not found.",
+      };
+    }
+    if (this.expirePendingBooking(booking, now)) {
+      return {
+        ok: false,
+        errorCode: "PENDING_EXPIRED",
+        message: "Expired pending bookings cannot be approved.",
+      };
+    }
+    if (booking.status !== "pending") {
+      return {
+        ok: false,
+        errorCode: "INVALID_BOOKING_STATE",
+        message: "Only pending bookings can be approved.",
+      };
+    }
+    booking.status = "confirmed";
+    booking.pendingExpiresAt = null;
+    booking.updatedAt = now.toISOString();
+    return { ok: true };
+  }
+
   /**
    * Computes peak overlapping allocated units in `[startMs, effectiveEndMs)`
    * for a given resource on a date, counting `confirmed` bookings and unexpired
@@ -344,10 +457,18 @@ export class BookingEngine {
     excludeBookingId?: string;
   }): Promise<AvailabilityQueryResult> {
     const now = params.now ?? new Date();
+    if (this.persistenceMode === "supabase") {
+      return getSupabaseAvailability(
+        getRequiredSupabaseServiceRoleClient(),
+        {
+          ...params,
+          now,
+        }
+      );
+    }
+
     const nowMs = now.getTime();
-    const backendMode = isSupabaseConfigured()
-      ? "supabase"
-      : "local-transactional";
+    const backendMode = "local-transactional" as const;
 
     const service = this.getServiceConfig(params.optionSlug);
     if (!service) {
@@ -619,8 +740,18 @@ export class BookingEngine {
 
     const now = input.now ?? new Date();
     const nowMs = now.getTime();
+    const requestFingerprint = createBookingRequestFingerprint(input);
 
-    const service = this.getServiceConfig(input.serviceOptionSlug);
+    const supabase =
+      this.persistenceMode === "supabase"
+        ? getRequiredSupabaseServiceRoleClient()
+        : null;
+    const supabaseContext = supabase
+      ? await getSupabaseBookingContext(supabase, input.serviceOptionSlug)
+      : null;
+    const service = supabase
+      ? supabaseContext?.service
+      : this.getServiceConfig(input.serviceOptionSlug);
     if (!service) {
       return {
         ok: false,
@@ -637,9 +768,11 @@ export class BookingEngine {
       };
     }
 
-    const resource = this.resources.find(
-      (r) => r.resourceType === service.requiredResourceType && r.isActive
-    );
+    const resource = supabase
+      ? supabaseContext?.resource
+      : this.resources.find(
+          (r) => r.resourceType === service.requiredResourceType && r.isActive
+        );
     if (!resource) {
       return {
         ok: false,
@@ -663,7 +796,6 @@ export class BookingEngine {
     ).toISOString();
 
     // If Supabase is configured, execute atomic PL/pgSQL RPC first
-    const supabase = getSupabaseServiceRoleClient();
     if (supabase) {
       const { data, error } = await supabase.rpc("create_booking_atomic", {
         p_idempotency_key: input.idempotencyKey.trim(),
@@ -683,7 +815,6 @@ export class BookingEngine {
         p_cancel_token_hash: cancelTokenPair.tokenHash,
         p_reschedule_token_hash: rescheduleTokenPair.tokenHash,
         p_token_expires_at: tokenExpiresAt,
-        p_now: now.toISOString(),
       });
 
       if (error || !data) {
@@ -733,15 +864,25 @@ export class BookingEngine {
       };
     }
 
-    // Local Transactional Engine (serialized via per-resource mutex lock matching SELECT ... FOR UPDATE on booking_resources)
-    const lockKey = resource.id;
+    // Local test model: serialize by idempotency key first, then resource.
+    const idempotencyLockKey = `idempotency:${input.idempotencyKey.trim()}`;
+    const resourceLockKey = `resource:${resource.id}`;
 
-    return this.withResourceLock(lockKey, async () => {
+    return this.withResourceLock(idempotencyLockKey, () =>
+      this.withResourceLock(resourceLockKey, async () => {
       // 1. Check idempotency key inside critical section
       const existingByIdempotency = this.bookings.find(
         (b) => b.idempotencyKey === input.idempotencyKey.trim()
       );
       if (existingByIdempotency) {
+        if (existingByIdempotency.requestFingerprint !== requestFingerprint) {
+          return {
+            ok: false,
+            errorCode: "IDEMPOTENCY_KEY_REUSED",
+            message:
+              "Idempotency key was already used for different booking details.",
+          };
+        }
         const existingVehicle = this.vehicles.find(
           (v) => v.id === existingByIdempotency.vehicleId
         );
@@ -794,7 +935,12 @@ export class BookingEngine {
       const openMins = parseTimeToMinutes(hours.openTime);
       const closeMins = parseTimeToMinutes(hours.closeTime);
 
-      if (startMins < openMins || endMins > closeMins) {
+      if (
+        startMins < openMins ||
+        endMins > closeMins ||
+        endMins <= startMins ||
+        endMins >= 24 * 60
+      ) {
         return {
           ok: false,
           errorCode: "OUTSIDE_OPERATING_HOURS",
@@ -916,6 +1062,7 @@ export class BookingEngine {
         id: bookingId,
         referenceCode,
         idempotencyKey: input.idempotencyKey.trim(),
+        requestFingerprint,
         customerId,
         vehicleId,
         serviceId: service.id,
@@ -1008,7 +1155,8 @@ export class BookingEngine {
           expiresAt: tokenExpiresAt,
         },
       };
-    });
+      })
+    );
   }
 
   /**
@@ -1026,6 +1174,16 @@ export class BookingEngine {
         errorCode: "INVALID_TOKEN",
         message: "Security token is invalid or malformed.",
       };
+    }
+
+    if (this.persistenceMode === "supabase") {
+      return inspectSupabaseBookingToken(
+        getRequiredSupabaseServiceRoleClient(),
+        {
+          ...params,
+          now,
+        }
+      );
     }
 
     const tokenHash = hashBookingToken(params.rawToken);
@@ -1118,14 +1276,16 @@ export class BookingEngine {
 
     const tokenHash = hashBookingToken(params.rawToken);
 
-    const supabase = getSupabaseServiceRoleClient();
+    const supabase =
+      this.persistenceMode === "supabase"
+        ? getRequiredSupabaseServiceRoleClient()
+        : null;
     if (supabase) {
       const { data, error } = await supabase.rpc(
         "cancel_booking_by_token_atomic",
         {
           p_token_hash: tokenHash,
           p_reason: params.reason ?? "Cancelled by customer",
-          p_now: now.toISOString(),
         }
       );
 
@@ -1171,7 +1331,7 @@ export class BookingEngine {
       };
     }
 
-    const lockKey = booking.resourceId;
+    const lockKey = `resource:${booking.resourceId}`;
     return this.withResourceLock(lockKey, async () => {
       if (tokenRow.usedAt || tokenRow.revokedAt) {
         return {
@@ -1189,9 +1349,19 @@ export class BookingEngine {
         };
       }
 
+      if (this.expirePendingBooking(booking, now)) {
+        return {
+          ok: false,
+          errorCode: "PENDING_EXPIRED",
+          message:
+            "The pending booking hold expired and can no longer be cancelled.",
+        };
+      }
+
       if (
         booking.status === "cancelled" ||
         booking.status === "rejected" ||
+        booking.status === "expired" ||
         booking.status === "completed"
       ) {
         return {
@@ -1201,8 +1371,28 @@ export class BookingEngine {
         };
       }
 
+      const service = this.services.find((row) => row.id === booking.serviceId);
+      if (!service) {
+        return {
+          ok: false,
+          errorCode: "INVALID_SERVICE",
+          message: "The booking service could not be located.",
+        };
+      }
+      const cutoffMs =
+        new Date(booking.startAt).getTime() -
+        (service.cancellationCutoffMinutes ?? 0) * 60_000;
+      if (now.getTime() >= cutoffMs) {
+        return {
+          ok: false,
+          errorCode: "MODIFICATION_CUTOFF_REACHED",
+          message: "The cancellation cutoff has been reached.",
+        };
+      }
+
       const previousStatus = booking.status;
       booking.status = "cancelled";
+      booking.pendingExpiresAt = null;
       booking.cancellationReason =
         params.reason?.trim() || "Cancelled by customer";
       booking.cancelledAt = now.toISOString();
@@ -1267,7 +1457,7 @@ export class BookingEngine {
 
     if (
       !/^\d{4}-\d{2}-\d{2}$/.test(params.newAppointmentDate) ||
-      !/^\d{2}:\d{2}$/.test(params.newStartTimeLocal)
+      !isValidLocalTime(params.newStartTimeLocal)
     ) {
       return {
         ok: false,
@@ -1290,7 +1480,10 @@ export class BookingEngine {
       )
     ).toISOString();
 
-    const supabase = getSupabaseServiceRoleClient();
+    const supabase =
+      this.persistenceMode === "supabase"
+        ? getRequiredSupabaseServiceRoleClient()
+        : null;
     if (supabase) {
       const { data, error } = await supabase.rpc(
         "reschedule_booking_by_token_atomic",
@@ -1301,7 +1494,6 @@ export class BookingEngine {
           p_new_cancel_token_hash: newCancelToken.tokenHash,
           p_new_reschedule_token_hash: newRescheduleToken.tokenHash,
           p_new_token_expires_at: newTokenExpiresAt,
-          p_now: now.toISOString(),
         }
       );
 
@@ -1354,7 +1546,7 @@ export class BookingEngine {
       };
     }
 
-    const lockKey = booking.resourceId;
+    const lockKey = `resource:${booking.resourceId}`;
     return this.withResourceLock(lockKey, async () => {
       if (tokenRow.usedAt || tokenRow.revokedAt) {
         return {
@@ -1369,6 +1561,15 @@ export class BookingEngine {
           ok: false,
           errorCode: "TOKEN_EXPIRED",
           message: "This reschedule token has expired.",
+        };
+      }
+
+      if (this.expirePendingBooking(booking, now)) {
+        return {
+          ok: false,
+          errorCode: "PENDING_EXPIRED",
+          message:
+            "The pending booking hold expired and can no longer be rescheduled.",
         };
       }
 
@@ -1387,6 +1588,17 @@ export class BookingEngine {
           ok: false,
           errorCode: "RESOURCE_UNAVAILABLE",
           message: "Service or studio bay configuration unavailable.",
+        };
+      }
+
+      const cutoffMs =
+        new Date(booking.startAt).getTime() -
+        (service.rescheduleCutoffMinutes ?? 0) * 60_000;
+      if (nowMs >= cutoffMs) {
+        return {
+          ok: false,
+          errorCode: "MODIFICATION_CUTOFF_REACHED",
+          message: "The rescheduling cutoff has been reached.",
         };
       }
 
@@ -1409,11 +1621,16 @@ export class BookingEngine {
       }
 
       const startMins = parseTimeToMinutes(params.newStartTimeLocal);
-      const endMins = startMins + service.durationMinutes;
+      const endMins = startMins + booking.durationMinutes;
       const openMins = parseTimeToMinutes(hours.openTime);
       const closeMins = parseTimeToMinutes(hours.closeTime);
 
-      if (startMins < openMins || endMins > closeMins) {
+      if (
+        startMins < openMins ||
+        endMins > closeMins ||
+        endMins <= startMins ||
+        endMins >= 24 * 60
+      ) {
         return {
           ok: false,
           errorCode: "OUTSIDE_OPERATING_HOURS",
@@ -1423,9 +1640,9 @@ export class BookingEngine {
 
       const newEndTimeLocal = minutesToTimeStr(endMins);
       const startMs = new Date(newStartIso).getTime();
-      const endMs = startMs + service.durationMinutes * 60_000;
+      const endMs = startMs + booking.durationMinutes * 60_000;
       const effectiveEndMs =
-        startMs + (service.durationMinutes + service.bufferMinutes) * 60_000;
+        startMs + (booking.durationMinutes + booking.bufferMinutes) * 60_000;
 
       if (startMs < nowMs + service.minNoticeHours * 3_600_000) {
         return {
@@ -1563,5 +1780,5 @@ export const defaultBookingEngine =
 export function createIsolatedBookingEngine(
   options?: ConstructorParameters<typeof BookingEngine>[0]
 ): BookingEngine {
-  return new BookingEngine(options);
+  return new BookingEngine({ ...options, persistenceMode: "memory-test" });
 }

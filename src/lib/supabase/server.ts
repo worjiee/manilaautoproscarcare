@@ -1,4 +1,10 @@
+import "server-only";
+
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  readSupabasePublicConfig,
+  readSupabaseSecretConfig,
+} from "@/lib/supabase/config";
 
 function assertServerEnvironment() {
   if (typeof window !== "undefined") {
@@ -9,61 +15,66 @@ function assertServerEnvironment() {
 }
 
 export function isSupabaseConfigured(): boolean {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!url || !serviceKey) return false;
-  if (
-    url.includes("your-project-ref") ||
-    serviceKey.includes("placeholder")
-  ) {
-    return false;
-  }
-  return true;
+  assertServerEnvironment();
+  return Boolean(
+    readSupabaseSecretConfig(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY
+    )
+  );
 }
 
 /**
- * Least-privilege server-side Supabase client using the anon key (respects RLS).
+ * Least-privilege server-side Supabase client using the public key (respects
+ * RLS as anon, or authenticated when a user session JWT is present).
  */
 export function getSupabaseAnonServerClient(): SupabaseClient | null {
   assertServerEnvironment();
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const config = readSupabasePublicConfig(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  );
 
-  if (
-    !url ||
-    !anonKey ||
-    url.includes("your-project-ref") ||
-    anonKey.includes("placeholder")
-  ) {
-    return null;
-  }
+  if (!config) return null;
 
-  return createClient(url, anonKey, {
+  return createClient(config.url, config.publishableKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
+      detectSessionInUrl: false,
     },
   });
 }
 
 /**
- * Privileged server-only Supabase client for atomic booking RPCs and token
- * validation where RLS intentionally blocks direct anonymous table access.
+ * Privileged server-only Supabase client. The existing service-role variable
+ * accepts the newer sb_secret_ key, which Supabase maps to the service_role
+ * PostgreSQL role and therefore bypasses RLS.
  */
 export function getSupabaseServiceRoleClient(): SupabaseClient | null {
   assertServerEnvironment();
-  if (!isSupabaseConfigured()) {
-    return null;
-  }
+  const config = readSupabaseSecretConfig(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY
+  );
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  if (!config) return null;
 
-  return createClient(url, serviceKey, {
+  return createClient(config.url, config.secretKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
+      detectSessionInUrl: false,
     },
   });
+}
+
+export function getRequiredSupabaseServiceRoleClient(): SupabaseClient {
+  const client = getSupabaseServiceRoleClient();
+  if (!client) {
+    throw new Error(
+      "Supabase is required for booking persistence. In-memory fallback is disabled."
+    );
+  }
+  return client;
 }
