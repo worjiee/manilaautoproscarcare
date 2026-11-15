@@ -9,6 +9,12 @@ import {
   getSupabaseAnonServerClient,
 } from "@/lib/supabase/server";
 
+const integrationRunRequested =
+  process.env.RUN_SUPABASE_INTEGRATION_TESTS === "true";
+const integrationWritesAuthorized =
+  process.env.SUPABASE_INTEGRATION_ALLOW_WRITES === "true";
+const authorizedProjectRef = process.env.SUPABASE_INTEGRATION_PROJECT_REF;
+
 loadEnvConfig(process.cwd());
 
 function configuredProjectRef(): string | null {
@@ -22,13 +28,12 @@ function configuredProjectRef(): string | null {
   }
 }
 
-const expectedProjectRef = process.env.SUPABASE_INTEGRATION_PROJECT_REF;
 const integrationWritesEnabled =
-  process.env.RUN_SUPABASE_INTEGRATION_TESTS === "true" &&
-  process.env.SUPABASE_INTEGRATION_ALLOW_WRITES === "true" &&
+  integrationRunRequested &&
+  integrationWritesAuthorized &&
   process.env.VERCEL_ENV !== "production" &&
-  Boolean(expectedProjectRef) &&
-  configuredProjectRef() === expectedProjectRef;
+  Boolean(authorizedProjectRef) &&
+  configuredProjectRef() === authorizedProjectRef;
 
 const describeIntegration = integrationWritesEnabled ? describe : describe.skip;
 
@@ -60,6 +65,7 @@ describeIntegration("Supabase PostgreSQL booking integration", () => {
   const manualSlug = `integration-manual-${runId}`;
   const resourceIds: string[] = [];
   const serviceIds: string[] = [];
+  const businessHourIds: string[] = [];
   const bookingIds: string[] = [];
   const customerIds: string[] = [];
   const vehicleIds: string[] = [];
@@ -117,17 +123,43 @@ describeIntegration("Supabase PostgreSQL booking integration", () => {
     );
     const { data: hours, error: hoursError } = await admin
       .from("business_hours")
-      .select("day_of_week,is_closed")
+      .select("id,day_of_week,is_closed")
       .in("day_of_week", [...requiredDays]);
     if (hoursError) throw hoursError;
-    if (
-      !hours ||
-      hours.length !== requiredDays.size ||
-      hours.some((row) => row.is_closed)
-    ) {
+    if (hours?.some((row) => row.is_closed)) {
       throw new Error(
-        "Dedicated integration project must contain open business-hour rows for the test dates."
+        "Integration tests will not modify an existing closed business-hour row."
       );
+    }
+
+    const existingDays = new Set((hours ?? []).map((row) => row.day_of_week));
+    const missingDays = [...requiredDays].filter((day) => !existingDays.has(day));
+    if (missingDays.length > 0) {
+      const dayNames = [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+      ];
+      const { data: insertedHours, error: insertHoursError } = await admin
+        .from("business_hours")
+        .insert(
+          missingDays.map((day) => ({
+            day_of_week: day,
+            day_name: dayNames[day],
+            open_time: "09:00:00",
+            close_time: "18:00:00",
+            slot_interval_minutes: 60,
+            is_closed: false,
+            is_dev_default: true,
+          }))
+        )
+        .select("id");
+      if (insertHoursError) throw insertHoursError;
+      businessHourIds.push(...(insertedHours ?? []).map((row) => row.id));
     }
 
     const { data: resources, error: resourceError } = await admin
@@ -199,6 +231,9 @@ describeIntegration("Supabase PostgreSQL booking integration", () => {
         .from("booking_resources")
         .update({ is_active: false })
         .in("id", resourceIds);
+    }
+    if (businessHourIds.length > 0) {
+      await admin.from("business_hours").delete().in("id", businessHourIds);
     }
     if (authUserId) {
       await admin.auth.admin.deleteUser(authUserId);
