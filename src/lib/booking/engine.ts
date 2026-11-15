@@ -1,3 +1,5 @@
+import "server-only";
+
 import { createHash, randomUUID } from "node:crypto";
 import {
   generateBookingReference,
@@ -10,8 +12,11 @@ import {
 import {
   getSupabaseAvailability,
   getSupabaseBookingContext,
+  getSupabaseTokenEnvelopeVersion,
   inspectSupabaseBookingToken,
 } from "./supabase-persistence";
+import { readEmailConfig } from "@/lib/email/config";
+import { encryptManagementLinkSecrets } from "@/lib/email/management-link-envelope";
 import {
   DEFAULT_BOOKING_RESOURCES,
   DEFAULT_BUSINESS_HOURS,
@@ -797,7 +802,28 @@ export class BookingEngine {
 
     // If Supabase is configured, execute atomic PL/pgSQL RPC first
     if (supabase) {
-      const { data, error } = await supabase.rpc("create_booking_atomic", {
+      const emailConfig = readEmailConfig();
+      const managementEnvelope = emailConfig.enabled
+        ? encryptManagementLinkSecrets({
+            secrets: {
+              cancelToken: cancelTokenPair.rawToken,
+              rescheduleToken: rescheduleTokenPair.rawToken,
+              expiresAt: tokenExpiresAt,
+            },
+            binding: {
+              tokenVersion: 1,
+              cancelTokenHash: cancelTokenPair.tokenHash,
+              rescheduleTokenHash: rescheduleTokenPair.tokenHash,
+            },
+            key: emailConfig.tokenEncryptionKey,
+            keyVersion: emailConfig.tokenEncryptionKeyVersion,
+          })
+        : null;
+      const { data, error } = await supabase.rpc(
+        emailConfig.enabled
+          ? "create_booking_with_email_atomic"
+          : "create_booking_atomic",
+        {
         p_idempotency_key: input.idempotencyKey.trim(),
         p_reference_code: referenceCode,
         p_option_slug: service.optionSlug,
@@ -815,7 +841,11 @@ export class BookingEngine {
         p_cancel_token_hash: cancelTokenPair.tokenHash,
         p_reschedule_token_hash: rescheduleTokenPair.tokenHash,
         p_token_expires_at: tokenExpiresAt,
-      });
+        ...(emailConfig.enabled
+          ? { p_management_envelope: managementEnvelope }
+          : {}),
+      }
+      );
 
       if (error || !data) {
         return {
@@ -1485,8 +1515,40 @@ export class BookingEngine {
         ? getRequiredSupabaseServiceRoleClient()
         : null;
     if (supabase) {
+      const emailConfig = readEmailConfig();
+      let managementEnvelope = null;
+      if (emailConfig.enabled) {
+        const tokenVersion = await getSupabaseTokenEnvelopeVersion(
+          supabase,
+          tokenHash,
+          now
+        );
+        if (tokenVersion === null) {
+          return {
+            ok: false,
+            errorCode: "INVALID_TOKEN",
+            message: "Reschedule token is invalid or no longer active.",
+          };
+        }
+        managementEnvelope = encryptManagementLinkSecrets({
+          secrets: {
+            cancelToken: newCancelToken.rawToken,
+            rescheduleToken: newRescheduleToken.rawToken,
+            expiresAt: newTokenExpiresAt,
+          },
+          binding: {
+            tokenVersion,
+            cancelTokenHash: newCancelToken.tokenHash,
+            rescheduleTokenHash: newRescheduleToken.tokenHash,
+          },
+          key: emailConfig.tokenEncryptionKey,
+          keyVersion: emailConfig.tokenEncryptionKeyVersion,
+        });
+      }
       const { data, error } = await supabase.rpc(
-        "reschedule_booking_by_token_atomic",
+        emailConfig.enabled
+          ? "reschedule_booking_with_email_atomic"
+          : "reschedule_booking_by_token_atomic",
         {
           p_token_hash: tokenHash,
           p_new_appointment_date: params.newAppointmentDate,
@@ -1494,6 +1556,9 @@ export class BookingEngine {
           p_new_cancel_token_hash: newCancelToken.tokenHash,
           p_new_reschedule_token_hash: newRescheduleToken.tokenHash,
           p_new_token_expires_at: newTokenExpiresAt,
+          ...(emailConfig.enabled
+            ? { p_management_envelope: managementEnvelope }
+            : {}),
         }
       );
 

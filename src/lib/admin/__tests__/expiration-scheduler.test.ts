@@ -10,6 +10,9 @@ const permissionMigration = read(
   "supabase/migrations/20261113000001_harden_booking_rpc_permissions.sql"
 );
 const scheduler = read("supabase/scheduler/expire_pending_bookings.sql");
+const integrationSuite = read(
+  "src/lib/admin/__tests__/expire-pending.integration.test.ts"
+);
 
 const expirationFunction = rpcMigration.match(
   /CREATE OR REPLACE FUNCTION public\.expire_pending_bookings_atomic\(\)[\s\S]*?(?=REVOKE ALL ON FUNCTION public\.expire_pending_bookings_atomic)/
@@ -59,5 +62,24 @@ describe("pending-booking expiration scheduler contract", () => {
       "SELECT public.expire_pending_bookings_atomic();"
     );
     expect(scheduler).not.toMatch(/net\.http|ADMIN_CRON_SECRET|vault/i);
+  });
+
+  it("isolates live fixtures from public configuration and the active Cron job", () => {
+    const setup = integrationSuite.match(
+      /beforeAll\(async \(\) => \{[\s\S]*?\r?\n  \}\);\r?\n\r?\n  afterAll/
+    )?.[0];
+
+    expect(setup).toBeTruthy();
+    expect(integrationSuite).toContain("assertConfigurationIsolation");
+    expect(integrationSuite).toContain('.from("business_hours").insert');
+    expect(integrationSuite).toContain("closeFixtureConfiguration");
+    expect(integrationSuite).toContain('.update({ is_active: false })');
+    expect(integrationSuite).toMatch(/\.from\("business_hours"\)\s+\.delete\(\)/);
+    expect(setup?.indexOf("concurrentSecondId = await insertBooking")).toBeLessThan(
+      setup?.indexOf("await closeFixtureConfiguration();") ?? -1
+    );
+    expect(integrationSuite).toContain("makeTestBookingsEligible");
+    expect(integrationSuite).toContain("expirationAuditCount(id)).toBe(1)");
+    expect(integrationSuite).not.toContain("expiredCount: 1 }");
   });
 });

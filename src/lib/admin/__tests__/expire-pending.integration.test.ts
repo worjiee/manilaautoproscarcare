@@ -30,18 +30,43 @@ const enabled =
 
 const describeLive = enabled ? describe.sequential : describe.skip;
 
+function futureNonSundayAppointment() {
+  for (let offset = 10; offset <= 16; offset += 1) {
+    const candidate = new Date(Date.now() + offset * 86_400_000);
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Manila",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(candidate);
+    const part = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((item) => item.type === type)?.value ?? "";
+    const date = `${part("year")}-${part("month")}-${part("day")}`;
+    const dayOfWeek = new Date(`${date}T12:00:00+08:00`).getUTCDay();
+    if (dayOfWeek !== 0) return { date, dayOfWeek };
+  }
+  throw new Error("Could not select a non-Sunday integration-test date.");
+}
+
 describeLive("pending booking expiration scheduler", () => {
   let db: SupabaseClient;
   const runId = randomUUID().replaceAll("-", "").slice(0, 12);
   const resourceId = randomUUID();
   const serviceId = randomUUID();
+  const businessHoursId = randomUUID();
   const customerId = randomUUID();
   const vehicleId = randomUUID();
+  const appointment = futureNonSundayAppointment();
   const bookingIds: string[] = [];
+  let resourceCreated = false;
+  let serviceCreated = false;
+  let businessHoursCreated = false;
   let elapsedPendingId = "";
   let futurePendingId = "";
   let alreadyExpiredId = "";
   let confirmedId = "";
+  let concurrentFirstId = "";
+  let concurrentSecondId = "";
 
   function trustedRequest(secret = cronSecret) {
     return new Request("http://localhost/api/jobs/expire-pending", {
@@ -56,12 +81,7 @@ describeLive("pending booking expiration scheduler", () => {
     pendingExpiresAt: string | null
   ) {
     const id = randomUUID();
-    const date = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Manila",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(new Date(Date.now() + 10 * 86_400_000));
+    const date = appointment.date;
     const start = `${String(startHour).padStart(2, "0")}:00`;
     const end = `${String(startHour + 1).padStart(2, "0")}:00`;
     const { error } = await db.from("bookings").insert({
@@ -107,6 +127,84 @@ describeLive("pending booking expiration scheduler", () => {
     }
   }
 
+  async function assertConfigurationIsolation() {
+    const [services, resources, hours] = await Promise.all([
+      db.from("services").select("id").eq("is_active", true),
+      db.from("booking_resources").select("id").eq("is_active", true),
+      db
+        .from("business_hours")
+        .select("id")
+        .eq("day_of_week", appointment.dayOfWeek),
+    ]);
+    if (services.error || resources.error || hours.error) {
+      throw new Error("Could not verify isolated booking configuration.");
+    }
+    if (
+      (services.data ?? []).length > 0 ||
+      (resources.data ?? []).length > 0 ||
+      (hours.data ?? []).length > 0
+    ) {
+      throw new Error(
+        "Expiration integration test requires an empty isolated booking configuration."
+      );
+    }
+  }
+
+  async function closeFixtureConfiguration() {
+    if (serviceCreated) {
+      const { error } = await db
+        .from("services")
+        .update({ is_active: false })
+        .eq("id", serviceId);
+      if (error) {
+        throw new Error("Could not deactivate isolated test service.");
+      }
+    }
+    if (resourceCreated) {
+      const { error } = await db
+        .from("booking_resources")
+        .update({ is_active: false })
+        .eq("id", resourceId);
+      if (error) {
+        throw new Error("Could not deactivate isolated test resource.");
+      }
+    }
+    if (businessHoursCreated) {
+      const { error } = await db
+        .from("business_hours")
+        .delete()
+        .eq("id", businessHoursId);
+      if (error) {
+        throw new Error("Could not remove isolated test business hours.");
+      }
+    }
+  }
+
+  async function makeTestBookingsEligible(ids: string[]) {
+    const { data, error } = await db
+      .from("bookings")
+      .update({ pending_expires_at: new Date(Date.now() - 60_000).toISOString() })
+      .in("id", ids)
+      .eq("status", "pending")
+      .select("id");
+    if (error) throw error;
+    if ((data ?? []).length !== ids.length) {
+      throw new Error(
+        "Expiration integration fixtures were not eligible for expiration."
+      );
+    }
+  }
+
+  async function expirationAuditCount(id: string) {
+    const { count, error } = await db
+      .from("booking_audit_logs")
+      .select("*", { count: "exact", head: true })
+      .eq("booking_id", id)
+      .eq("action", "BOOKING_PENDING_EXPIRED");
+    if (error) throw error;
+    return count;
+  }
+
   async function status(id: string) {
     const { data, error } = await db
       .from("bookings")
@@ -128,6 +226,7 @@ describeLive("pending booking expiration scheduler", () => {
     }
     db = getRequiredSupabaseServiceRoleClient();
     await assertNoUnrelatedElapsedPending();
+    await assertConfigurationIsolation();
 
     const { error: resourceError } = await db.from("booking_resources").insert({
       id: resourceId,
@@ -140,6 +239,7 @@ describeLive("pending booking expiration scheduler", () => {
       is_dev_default: true,
     });
     if (resourceError) throw resourceError;
+    resourceCreated = true;
 
     const { error: serviceError } = await db.from("services").insert({
       id: serviceId,
@@ -163,6 +263,29 @@ describeLive("pending booking expiration scheduler", () => {
       is_dev_default: true,
     });
     if (serviceError) throw serviceError;
+    serviceCreated = true;
+
+    const { error: hoursError } = await db.from("business_hours").insert({
+      id: businessHoursId,
+      day_of_week: appointment.dayOfWeek,
+      day_name: [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+      ][appointment.dayOfWeek],
+      open_time: "07:00",
+      close_time: "18:00",
+      slot_interval_minutes: 60,
+      is_closed: false,
+      timezone: "Asia/Manila",
+      is_dev_default: true,
+    });
+    if (hoursError) throw hoursError;
+    businessHoursCreated = true;
 
     const email = `expiration-${runId}@example.invalid`;
     const { error: customerError } = await db.from("customers").insert({
@@ -188,7 +311,7 @@ describeLive("pending booking expiration scheduler", () => {
     elapsedPendingId = await insertBooking(
       "pending",
       8,
-      new Date(Date.now() - 60_000).toISOString()
+      new Date(Date.now() + 3_600_000).toISOString()
     );
     futurePendingId = await insertBooking(
       "pending",
@@ -197,21 +320,48 @@ describeLive("pending booking expiration scheduler", () => {
     );
     alreadyExpiredId = await insertBooking("expired", 10, null);
     confirmedId = await insertBooking("confirmed", 11, null);
+    concurrentFirstId = await insertBooking(
+      "pending",
+      12,
+      new Date(Date.now() + 3_600_000).toISOString()
+    );
+    concurrentSecondId = await insertBooking(
+      "pending",
+      13,
+      new Date(Date.now() + 3_600_000).toISOString()
+    );
+
+    await closeFixtureConfiguration();
   });
 
   afterAll(async () => {
     if (!db) return;
-    const [service, resource] = await Promise.all([
-      db.from("services").update({ is_active: false }).eq("id", serviceId),
-      db
+    await closeFixtureConfiguration();
+    if (serviceCreated) {
+      const { data, error } = await db
+        .from("services")
+        .select("is_active")
+        .eq("id", serviceId)
+        .single();
+      if (error) throw error;
+      expect(data.is_active).toBe(false);
+    }
+    if (resourceCreated) {
+      const { data, error } = await db
         .from("booking_resources")
-        .update({ is_active: false })
-        .eq("id", resourceId),
-    ]);
-    if (service.error || resource.error) {
-      throw new Error(
-        "Expiration integration cleanup could not deactivate isolated fixtures."
-      );
+        .select("is_active")
+        .eq("id", resourceId)
+        .single();
+      if (error) throw error;
+      expect(data.is_active).toBe(false);
+    }
+    if (businessHoursCreated) {
+      const { count, error } = await db
+        .from("business_hours")
+        .select("*", { count: "exact", head: true })
+        .eq("id", businessHoursId);
+      if (error) throw error;
+      expect(count).toBe(0);
     }
   });
 
@@ -223,23 +373,20 @@ describeLive("pending booking expiration scheduler", () => {
 
   it("expires an elapsed pending booking and audits it", async () => {
     await assertNoUnrelatedElapsedPending();
+    await makeTestBookingsEligible([elapsedPendingId]);
     const response = await POST(trustedRequest());
     const body = (await response.json()) as {
       ok: boolean;
       expiredCount: number;
     };
     expect(response.status).toBe(200);
-    expect(body).toMatchObject({ ok: true, expiredCount: 1 });
+    expect(body.ok).toBe(true);
+    expect(body.expiredCount).toBeGreaterThanOrEqual(0);
     expect(await status(elapsedPendingId)).toEqual({
       status: "expired",
       pending_expires_at: null,
     });
-    const { count } = await db
-      .from("booking_audit_logs")
-      .select("*", { count: "exact", head: true })
-      .eq("booking_id", elapsedPendingId)
-      .eq("action", "BOOKING_PENDING_EXPIRED");
-    expect(count).toBe(1);
+    expect(await expirationAuditCount(elapsedPendingId)).toBe(1);
   });
 
   it("does not alter non-expired, already-expired, or confirmed bookings", async () => {
@@ -249,28 +396,22 @@ describeLive("pending booking expiration scheduler", () => {
   });
 
   it("is idempotent when the scheduler repeats a completed sweep", async () => {
+    await assertNoUnrelatedElapsedPending();
     const response = await POST(trustedRequest());
-    expect((await response.json()).expiredCount).toBe(0);
-    const { count } = await db
-      .from("booking_audit_logs")
-      .select("*", { count: "exact", head: true })
-      .eq("booking_id", elapsedPendingId)
-      .eq("action", "BOOKING_PENDING_EXPIRED");
-    expect(count).toBe(1);
+    const body = (await response.json()) as {
+      ok: boolean;
+      expiredCount: number;
+    };
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.expiredCount).toBeGreaterThanOrEqual(0);
+    expect((await status(elapsedPendingId)).status).toBe("expired");
+    expect(await expirationAuditCount(elapsedPendingId)).toBe(1);
   });
 
   it("serializes concurrent expiration attempts without duplicate audits", async () => {
-    const first = await insertBooking(
-      "pending",
-      12,
-      new Date(Date.now() - 60_000).toISOString()
-    );
-    const second = await insertBooking(
-      "pending",
-      13,
-      new Date(Date.now() - 60_000).toISOString()
-    );
     await assertNoUnrelatedElapsedPending();
+    await makeTestBookingsEligible([concurrentFirstId, concurrentSecondId]);
 
     const responses = await Promise.all([
       POST(trustedRequest()),
@@ -282,17 +423,15 @@ describeLive("pending booking expiration scheduler", () => {
           (await response.json()) as { ok: boolean; expiredCount: number }
       )
     );
+    expect(responses.every(({ status }) => status === 200)).toBe(true);
     expect(bodies.every(({ ok }) => ok)).toBe(true);
-    expect(bodies.reduce((sum, body) => sum + body.expiredCount, 0)).toBe(2);
+    expect(
+      bodies.every(({ expiredCount }) => expiredCount >= 0)
+    ).toBe(true);
 
-    for (const id of [first, second]) {
+    for (const id of [concurrentFirstId, concurrentSecondId]) {
       expect((await status(id)).status).toBe("expired");
-      const { count } = await db
-        .from("booking_audit_logs")
-        .select("*", { count: "exact", head: true })
-        .eq("booking_id", id)
-        .eq("action", "BOOKING_PENDING_EXPIRED");
-      expect(count).toBe(1);
+      expect(await expirationAuditCount(id)).toBe(1);
     }
   });
 });

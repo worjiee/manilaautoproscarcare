@@ -559,3 +559,37 @@ export async function inspectSupabaseBookingToken(
     },
   };
 }
+
+export async function getSupabaseTokenEnvelopeVersion(
+  supabase: SupabaseClient,
+  tokenHash: string,
+  now: Date
+): Promise<number | null> {
+  const { data: token, error: tokenError } = await supabase
+    .from("booking_tokens")
+    .select("booking_id,expires_at,used_at,revoked_at")
+    .eq("token_hash", tokenHash)
+    .maybeSingle();
+
+  if (
+    tokenError ||
+    !token ||
+    token.used_at ||
+    token.revoked_at ||
+    new Date(token.expires_at).getTime() <= now.getTime()
+  ) {
+    return null;
+  }
+
+  const { data: booking, error: bookingError } = await supabase
+    .from("bookings")
+    .select("rescheduled_count")
+    .eq("id", token.booking_id)
+    .maybeSingle();
+
+  if (bookingError || !booking) return null;
+
+  // The verified reschedule RPC increments rescheduled_count before the
+  // encrypted token generation is committed. Version 1 is the original pair.
+  return Number(booking.rescheduled_count) + 2;
+}
