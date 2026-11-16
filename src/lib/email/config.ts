@@ -24,6 +24,7 @@ export type EnabledEmailConfig = {
   testRecipient: string | null;
   tokenEncryptionKey: Buffer;
   tokenEncryptionKeyVersion: string;
+  tokenDecryptionKeys: ReadonlyMap<string, Buffer>;
 };
 
 export type EmailConfig = DisabledEmailConfig | EnabledEmailConfig;
@@ -71,6 +72,43 @@ function parseEncryptionKey(value: string): Buffer {
     );
   }
   return key;
+}
+
+function parsePreviousEncryptionKeys(
+  rawValue: string | undefined,
+  currentVersion: string,
+  currentKey: Buffer
+): ReadonlyMap<string, Buffer> {
+  const keys = new Map<string, Buffer>([[currentVersion, currentKey]]);
+  if (!rawValue?.trim()) return keys;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawValue);
+  } catch {
+    throw new Error(
+      "EMAIL_CONFIGURATION_ERROR: EMAIL_TOKEN_ENCRYPTION_PREVIOUS_KEYS must be a JSON object."
+    );
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(
+      "EMAIL_CONFIGURATION_ERROR: EMAIL_TOKEN_ENCRYPTION_PREVIOUS_KEYS must be a JSON object."
+    );
+  }
+
+  for (const [version, encodedKey] of Object.entries(parsed)) {
+    if (
+      !/^[A-Za-z0-9._-]{1,64}$/.test(version) ||
+      version === currentVersion ||
+      typeof encodedKey !== "string"
+    ) {
+      throw new Error(
+        "EMAIL_CONFIGURATION_ERROR: Previous encryption key metadata is invalid."
+      );
+    }
+    keys.set(version, parseEncryptionKey(encodedKey));
+  }
+  return keys;
 }
 
 export function readEmailConfig(
@@ -150,6 +188,10 @@ export function readEmailConfig(
     );
   }
 
+  const tokenEncryptionKey = parseEncryptionKey(
+    requireValue(env, "EMAIL_TOKEN_ENCRYPTION_KEY")
+  );
+
   return {
     mode,
     enabled: true,
@@ -162,10 +204,13 @@ export function readEmailConfig(
     dispatchSecret,
     siteUrl: siteUrl.toString().replace(/\/$/, ""),
     testRecipient,
-    tokenEncryptionKey: parseEncryptionKey(
-      requireValue(env, "EMAIL_TOKEN_ENCRYPTION_KEY")
-    ),
+    tokenEncryptionKey,
     tokenEncryptionKeyVersion,
+    tokenDecryptionKeys: parsePreviousEncryptionKeys(
+      env.EMAIL_TOKEN_ENCRYPTION_PREVIOUS_KEYS,
+      tokenEncryptionKeyVersion,
+      tokenEncryptionKey
+    ),
   };
 }
 

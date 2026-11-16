@@ -246,6 +246,8 @@ BEGIN
 END;
 $$;
 
+ALTER FUNCTION public.set_email_delivery_updated_at() OWNER TO postgres;
+
 REVOKE ALL ON FUNCTION public.set_email_delivery_updated_at()
   FROM PUBLIC, anon, authenticated, service_role;
 
@@ -354,6 +356,9 @@ BEGIN
 END;
 $$;
 
+ALTER FUNCTION public.enqueue_booking_email_events_from_audit()
+  OWNER TO postgres;
+
 REVOKE ALL ON FUNCTION public.enqueue_booking_email_events_from_audit()
   FROM PUBLIC, anon, authenticated, service_role;
 
@@ -396,7 +401,8 @@ BEGIN
      OR p_envelope->>'algorithm' <> 'aes-256-gcm'
      OR COALESCE(p_envelope->>'keyVersion', '') !~ '^[A-Za-z0-9._-]{1,64}$'
      OR COALESCE(p_envelope->>'nonce', '') !~ '^[A-Za-z0-9_-]{16}$'
-     OR COALESCE(p_envelope->>'ciphertext', '') !~ '^[A-Za-z0-9_-]{32,4096}$'
+     OR pg_catalog.char_length(COALESCE(p_envelope->>'ciphertext', '')) NOT BETWEEN 32 AND 4096
+     OR COALESCE(p_envelope->>'ciphertext', '') !~ '^[A-Za-z0-9_-]+$'
      OR COALESCE(p_envelope->>'authTag', '') !~ '^[A-Za-z0-9_-]{22}$'
      OR COALESCE(p_envelope->>'aadSha256', '') !~ '^[0-9a-f]{64}$'
   THEN
@@ -498,6 +504,10 @@ BEGIN
 END;
 $$;
 
+ALTER FUNCTION public.store_booking_delivery_secret_internal(
+  UUID, TEXT, TEXT, JSONB
+) OWNER TO postgres;
+
 REVOKE ALL ON FUNCTION public.store_booking_delivery_secret_internal(
   UUID, TEXT, TEXT, JSONB
 ) FROM PUBLIC, anon, authenticated, service_role;
@@ -573,6 +583,11 @@ BEGIN
 END;
 $$;
 
+ALTER FUNCTION public.create_booking_with_email_atomic(
+  TEXT, TEXT, TEXT, public.vehicle_type_enum, TEXT, TEXT, SMALLINT, TEXT,
+  DATE, TIME, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TIMESTAMPTZ, JSONB
+) OWNER TO postgres;
+
 REVOKE ALL ON FUNCTION public.create_booking_with_email_atomic(
   TEXT, TEXT, TEXT, public.vehicle_type_enum, TEXT, TEXT, SMALLINT, TEXT,
   DATE, TIME, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TIMESTAMPTZ, JSONB
@@ -620,6 +635,10 @@ BEGIN
   RETURN v_result;
 END;
 $$;
+
+ALTER FUNCTION public.reschedule_booking_with_email_atomic(
+  TEXT, DATE, TIME, TEXT, TEXT, TIMESTAMPTZ, JSONB
+) OWNER TO postgres;
 
 REVOKE ALL ON FUNCTION public.reschedule_booking_with_email_atomic(
   TEXT, DATE, TIME, TEXT, TEXT, TIMESTAMPTZ, JSONB

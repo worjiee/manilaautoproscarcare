@@ -62,13 +62,24 @@ function createClientIdempotencyKey(): string {
   return `idem-${Math.random().toString(36).slice(2)}-${ Math.random().toString(36).slice(2)}`;
 }
 
-export function BookingWizard() {
+export function BookingWizard({
+  allowedServiceSlugs,
+  demoMode = false,
+}: {
+  allowedServiceSlugs?: readonly string[];
+  demoMode?: boolean;
+}) {
   const searchParams = useSearchParams();
   const stepContainerRef = useRef<HTMLDivElement>(null);
 
   // Initialize from URL query parameters if valid
   const initialServiceSlug = searchParams.get("service") ?? "";
-  const matchedInitialService = getServiceBySlug(initialServiceSlug);
+  const requestedInitialService = getServiceBySlug(initialServiceSlug);
+  const matchedInitialService = requestedInitialService?.items.some((item) =>
+    allowedServiceSlugs?.includes(item.id) ?? true
+  )
+    ? requestedInitialService
+    : undefined;
   const paramVehicle = searchParams.get("vehicle");
   const initialVehicleType: VehicleType | "" =
     paramVehicle === "Car" || paramVehicle === "Motorcycle"
@@ -78,9 +89,12 @@ export function BookingWizard() {
       : "";
 
   const initialOptionParam = searchParams.get("option") ?? "";
+  const permittedInitialItems = matchedInitialService?.items.filter(
+    (item) => allowedServiceSlugs?.includes(item.id) ?? true
+  );
   const initialOptionId =
-    matchedInitialService?.items.find((i) => i.id === initialOptionParam)?.id ??
-    matchedInitialService?.items[0]?.id ??
+    permittedInitialItems?.find((i) => i.id === initialOptionParam)?.id ??
+    permittedInitialItems?.[0]?.id ??
     "";
 
   const [currentStep, setCurrentStep] = useState<StepNumber>(1);
@@ -178,11 +192,19 @@ export function BookingWizard() {
   };
 
   const availableCategories = useMemo(() => {
-    if (!draft.vehicleType) return SERVICE_CATEGORIES;
-    return SERVICE_CATEGORIES.filter((cat) =>
-      cat.vehicleTypes.includes(draft.vehicleType as VehicleType)
-    );
-  }, [draft.vehicleType]);
+    const categories = draft.vehicleType
+      ? SERVICE_CATEGORIES.filter((cat) =>
+          cat.vehicleTypes.includes(draft.vehicleType as VehicleType)
+        )
+      : SERVICE_CATEGORIES;
+    if (!allowedServiceSlugs) return categories;
+    return categories
+      .map((category) => ({
+        ...category,
+        items: category.items.filter((item) => allowedServiceSlugs.includes(item.id)),
+      }))
+      .filter((category) => category.items.length > 0);
+  }, [allowedServiceSlugs, draft.vehicleType]);
 
   const selectedCategory = useMemo(
     () => getServiceBySlug(draft.serviceCategorySlug),
@@ -283,6 +305,17 @@ export function BookingWizard() {
       if (digitsOnly.length < 10 || digitsOnly.length > 15) {
         nextErrors.customerPhone =
           "Please enter a valid mobile number (at least 10 digits).";
+      }
+      if (demoMode) {
+        if (!draft.customerName.trim().toLowerCase().startsWith("demo ")) {
+          nextErrors.customerName = 'Demo names must begin with "Demo ".';
+        }
+        if (!/^[^\s@]+@example\.test$/i.test(draft.customerEmail.trim())) {
+          nextErrors.customerEmail = "Use a synthetic @example.test email address.";
+        }
+        if (digitsOnly !== "09000000000") {
+          nextErrors.customerPhone = "Use the staging-only phone number 09000000000.";
+        }
       }
     }
 
@@ -590,7 +623,7 @@ export function BookingWizard() {
 
                   <div className="mt-4 flex flex-wrap gap-3">
                     <Link
-                      href={`/booking/manage?token=${encodeURIComponent(
+                      href={`/booking/manage#token=${encodeURIComponent(
                         tokens.rescheduleToken
                       )}&action=reschedule`}
                       className="inline-flex items-center gap-2 bg-[#E11D2E] px-5 py-2.5 font-display text-xs font-bold tracking-[0.14em] text-white uppercase transition-colors hover:bg-[#FF3045]"
@@ -601,7 +634,7 @@ export function BookingWizard() {
                     </Link>
 
                     <Link
-                      href={`/booking/manage?token=${encodeURIComponent(
+                      href={`/booking/manage#token=${encodeURIComponent(
                         tokens.cancelToken
                       )}&action=cancel`}
                       className="inline-flex items-center gap-2 border border-[#292929] bg-[#090909] px-5 py-2.5 font-display text-xs font-bold tracking-[0.14em] text-white uppercase transition-colors hover:border-[#E11D2E]"
@@ -661,6 +694,12 @@ export function BookingWizard() {
             Real-Time Availability &amp; Atomic Reservation Engine (Asia/Manila)
           </p>
           <p className="mt-1">
+            {demoMode && (
+              <strong className="text-amber-300">
+                DEMO DATA ONLY: use a name beginning with “Demo ”, an
+                @example.test email, and 09000000000.{" "}
+              </strong>
+            )}
             Slots are calculated dynamically against{" "}
             <strong className="text-white">Monday–Saturday</strong> operating
             windows, service-specific durations, and studio bay capacities.

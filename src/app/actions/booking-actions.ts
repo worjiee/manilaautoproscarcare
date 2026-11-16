@@ -12,6 +12,54 @@ import type {
   TokenInspectionResult,
 } from "@/lib/booking/types";
 import { checkRateLimit } from "@/lib/security/rate-limiter";
+import {
+  isAllowedDemoServiceSlug,
+  readStagingDemoPolicy,
+  validateDemoCustomer,
+} from "@/lib/env/staging";
+
+function disabledAvailability(params: {
+  dateStr: string;
+  optionSlug: string;
+  message: string;
+}): AvailabilityQueryResult {
+  return {
+    ok: false,
+    date: params.dateStr,
+    timezone: "Asia/Manila",
+    optionSlug: params.optionSlug,
+    serviceName: "",
+    durationMinutes: 0,
+    confirmationMode: "manual",
+    resourceName: "",
+    requiredUnits: 1,
+    isSundayClosed: false,
+    isDayBlocked: false,
+    blockedReason: null,
+    isOutOfAdvanceWindow: false,
+    isDevDefaultConfig: true,
+    backendMode: "supabase",
+    slots: [],
+    errorCode: "BOOKING_DISABLED",
+    errorMessage: params.message,
+  };
+}
+
+async function inspectAllowedDemoToken(
+  rawToken: string,
+  expectedPurpose?: BookingTokenPurpose
+): Promise<TokenInspectionResult> {
+  const policy = readStagingDemoPolicy();
+  if (!policy.publicBookingEnabled) {
+    return { ok: false, errorCode: "BOOKING_DISABLED", message: "Demo booking is not enabled." };
+  }
+  const result = await defaultBookingEngine.inspectToken({ rawToken, expectedPurpose });
+  if (!result.ok) return result;
+  if (!isAllowedDemoServiceSlug(policy, result.booking.serviceOptionSlug)) {
+    return { ok: false, errorCode: "INVALID_TOKEN", message: "Invalid booking management token." };
+  }
+  return result;
+}
 
 async function getClientRateLimitKey(scope: string): Promise<string> {
   try {
@@ -36,6 +84,13 @@ export async function getLiveServiceAvailabilityAction(params: {
   excludeBookingId?: string;
 }): Promise<AvailabilityQueryResult> {
   try {
+    const policy = readStagingDemoPolicy();
+    if (!isAllowedDemoServiceSlug(policy, params.optionSlug)) {
+      return disabledAvailability({
+        ...params,
+        message: "This service is not enabled for the private demo.",
+      });
+    }
     const rlKey = await getClientRateLimitKey("availability");
     const rl = checkRateLimit({
       key: rlKey,
@@ -104,6 +159,23 @@ export async function submitBookingReservationAction(
   input: Omit<CreateBookingInput, "now">
 ): Promise<CreateBookingResult> {
   try {
+    const policy = readStagingDemoPolicy();
+    if (!isAllowedDemoServiceSlug(policy, input.serviceOptionSlug)) {
+      return {
+        ok: false,
+        errorCode: "DEMO_SCOPE_VIOLATION",
+        message: "This booking is outside the approved demo configuration.",
+      };
+    }
+    const demoErrors = validateDemoCustomer(input);
+    if (Object.keys(demoErrors).length > 0) {
+      return {
+        ok: false,
+        errorCode: "VALIDATION_ERROR",
+        message: "Use synthetic development-only customer details.",
+        fieldErrors: demoErrors,
+      };
+    }
     const rlKey = await getClientRateLimitKey("booking-submit");
     const rl = checkRateLimit({
       key: rlKey,
@@ -154,10 +226,7 @@ export async function inspectBookingTokenAction(params: {
       };
     }
 
-    return await defaultBookingEngine.inspectToken({
-      rawToken: params.rawToken,
-      expectedPurpose: params.expectedPurpose,
-    });
+    return await inspectAllowedDemoToken(params.rawToken, params.expectedPurpose);
   } catch {
     return {
       ok: false,
@@ -175,6 +244,8 @@ export async function cancelBookingByTokenAction(params: {
   reason?: string;
 }): Promise<CancelBookingResult> {
   try {
+    const inspected = await inspectAllowedDemoToken(params.rawToken, "cancel");
+    if (!inspected.ok) return inspected;
     const rlKey = await getClientRateLimitKey("token-cancel");
     const rl = checkRateLimit({
       key: rlKey,
@@ -212,6 +283,8 @@ export async function rescheduleBookingByTokenAction(params: {
   newStartTimeLocal: string;
 }): Promise<RescheduleBookingResult> {
   try {
+    const inspected = await inspectAllowedDemoToken(params.rawToken, "reschedule");
+    if (!inspected.ok) return inspected;
     const rlKey = await getClientRateLimitKey("token-reschedule");
     const rl = checkRateLimit({
       key: rlKey,

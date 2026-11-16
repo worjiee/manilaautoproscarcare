@@ -14,7 +14,7 @@ export interface BookingEmailShellProps {
   preview: string;
   eyebrow: string;
   title: string;
-  children: React.ReactNode;
+  children?: React.ReactNode;
 }
 
 /** Versioned visual foundation only; Phase 5.1 does not dispatch it. */

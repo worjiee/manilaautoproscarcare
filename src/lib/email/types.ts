@@ -32,8 +32,15 @@ export interface BookingEmailTemplateDataV1 {
     | "cancelled"
     | "completed";
   customerFirstName?: string;
-  manageUrl?: string;
+  cancelUrl?: string;
+  rescheduleUrl?: string;
   adminUrl?: string;
+}
+
+export interface RenderedBookingEmail {
+  subject: string;
+  html: string;
+  text: string;
 }
 
 export interface VersionedEmailTemplate<TData> {

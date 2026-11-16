@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   ArrowLeft,
@@ -31,20 +30,33 @@ import type {
   TimeSlotOption,
   TokenInspectionResult,
 } from "@/lib/booking/types";
+import { consumeManagementLinkFragment } from "@/lib/booking/management-link-fragment";
 
 export function BookingManageView() {
-  const searchParams = useSearchParams();
-  const urlToken = searchParams.get("token") ?? "";
-  const urlAction = searchParams.get("action");
-
-  const [tokenInput, setTokenInput] = useState(urlToken);
-  const [activeToken, setActiveToken] = useState(urlToken);
+  const [tokenInput, setTokenInput] = useState("");
+  const [activeToken, setActiveToken] = useState("");
+  const [urlAction, setUrlAction] = useState<"cancel" | "reschedule" | null>(null);
   const [inspection, setInspection] = useState<TokenInspectionResult | null>(
     null
   );
-  const [isInspecting, setIsInspecting] = useState<boolean>(() =>
-    Boolean(urlToken)
-  );
+  const [isInspecting, setIsInspecting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const consumed = consumeManagementLinkFragment({
+      href: window.location.href,
+      replaceState: (url) => window.history.replaceState(null, "", url),
+    });
+    if (!consumed.token) return () => { cancelled = true; };
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setUrlAction(consumed.action);
+      setTokenInput(consumed.token);
+      setIsInspecting(true);
+      setActiveToken(consumed.token);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   // Cancellation state
   const [cancelReason, setCancelReason] = useState("");

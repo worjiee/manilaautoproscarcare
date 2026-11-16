@@ -5,10 +5,7 @@ import { readEmailConfig } from "./config";
 
 let client: Resend | null = null;
 
-/**
- * Returns no client while delivery is disabled. This module intentionally
- * exposes no send function in Phase 5.1.
- */
+/** Returns no client while delivery is disabled. */
 export function getResendClient(): Resend | null {
   const config = readEmailConfig();
   if (!config.enabled) return null;

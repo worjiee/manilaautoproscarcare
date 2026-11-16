@@ -14,6 +14,20 @@ const nextConfig: NextConfig = {
       },
     },
   },
+  async headers() {
+    if (process.env.STAGING_DEMO_MODE !== "true") return [];
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          {
+            key: "X-Robots-Tag",
+            value: "noindex, nofollow, noarchive, nosnippet",
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

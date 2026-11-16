@@ -8,6 +8,10 @@ import "./globals.css";
 import { SiteChrome } from "@/components/layout/site-chrome";
 import { BRAND_CONFIG } from "@/lib/constants/site-data";
 import { SITE_URL } from "@/lib/env/flags";
+import { readStagingDemoPolicy } from "@/lib/env/staging";
+import { DemoEnvironmentBanner } from "@/components/ui/demo-environment-banner";
+
+const stagingPolicy = readStagingDemoPolicy();
 
 const barlowCondensed = Barlow_Condensed({
   variable: "--font-barlow-condensed",
@@ -40,6 +44,16 @@ export const metadata: Metadata = {
     locale: "en_PH",
     type: "website",
   },
+  ...(stagingPolicy.demoMode
+    ? {
+        robots: {
+          index: false,
+          follow: false,
+          noarchive: true,
+          nocache: true,
+        },
+      }
+    : {}),
 };
 
 export default function RootLayout({
@@ -59,6 +73,7 @@ export default function RootLayout({
         >
           Skip to main content
         </a>
+        {stagingPolicy.demoMode && <DemoEnvironmentBanner />}
         <SiteChrome>{children}</SiteChrome>
       </body>
     </html>

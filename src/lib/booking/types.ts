@@ -15,6 +15,8 @@ export type BookingTokenPurpose = "cancel" | "reschedule";
 export type AuditActorType = "customer" | "system" | "admin";
 
 export type BookingErrorCode =
+  | "BOOKING_DISABLED"
+  | "DEMO_SCOPE_VIOLATION"
   | "VALIDATION_ERROR"
   | "RATE_LIMITED"
   | "INVALID_SERVICE"

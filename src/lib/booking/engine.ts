@@ -17,6 +17,7 @@ import {
 } from "./supabase-persistence";
 import { readEmailConfig } from "@/lib/email/config";
 import { encryptManagementLinkSecrets } from "@/lib/email/management-link-envelope";
+import type { EncryptedManagementLinkEnvelopeV1 } from "@/lib/email/management-link-envelope";
 import {
   DEFAULT_BOOKING_RESOURCES,
   DEFAULT_BUSINESS_HOURS,
@@ -1516,7 +1517,7 @@ export class BookingEngine {
         : null;
     if (supabase) {
       const emailConfig = readEmailConfig();
-      let managementEnvelope = null;
+      let managementEnvelope: EncryptedManagementLinkEnvelopeV1 | null = null;
       if (emailConfig.enabled) {
         const tokenVersion = await getSupabaseTokenEnvelopeVersion(
           supabase,

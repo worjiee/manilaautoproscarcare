@@ -7,6 +7,7 @@ import { createSupabaseAuthServerClient } from "@/lib/supabase/auth-server";
 import { getRequiredSupabaseServiceRoleClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/admin/auth";
 import { checkRateLimit } from "@/lib/security/rate-limiter";
+import { readStagingDemoPolicy } from "@/lib/env/staging";
 
 export type AdminActionState = { ok: boolean; message: string };
 const initialError = (message: string): AdminActionState => ({ ok: false, message });
@@ -71,6 +72,18 @@ export async function mutateBookingAction(
   if (operation === "reschedule" && (!date || !time || !datePattern.test(date) || !timePattern.test(time))) return initialError("A valid Manila appointment date and time are required.");
 
   const db = getRequiredSupabaseServiceRoleClient();
+  const policy = readStagingDemoPolicy();
+  if (policy.demoMode) {
+    const { data: scopedBooking, error: scopeError } = await db
+      .from("bookings")
+      .select("id,services!inner(option_slug)")
+      .eq("id", bookingId)
+      .in("services.option_slug", [...policy.serviceSlugs])
+      .maybeSingle();
+    if (scopeError || !scopedBooking) {
+      return initialError("This booking is outside the approved demo scope.");
+    }
+  }
   const { data, error } = await db.rpc("admin_transition_booking_atomic", {
     p_booking_id: bookingId,
     p_operation: operation,
@@ -90,6 +103,9 @@ export async function updateSettingsAction(
   _state: AdminActionState,
   formData: FormData
 ): Promise<AdminActionState> {
+  if (readStagingDemoPolicy().demoMode) {
+    return initialError("Business settings are read-only in the staging demo.");
+  }
   const admin = await requireAdmin();
   const kind = String(formData.get("kind") || "");
   const id = String(formData.get("id") || "");

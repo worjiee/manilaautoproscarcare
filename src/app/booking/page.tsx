@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { BRAND_CONFIG } from "@/lib/constants/site-data";
 import { PageHero } from "@/components/ui/page-hero";
 import { BookingWizard } from "@/components/booking/booking-wizard";
+import { readStagingDemoPolicy } from "@/lib/env/staging";
 
 export const metadata: Metadata = {
   title: "Online Appointment Booking",
@@ -20,6 +21,7 @@ function BookingWizardFallback() {
 }
 
 export default function BookingPage() {
+  const policy = readStagingDemoPolicy();
   return (
     <>
       <PageHero
@@ -35,9 +37,22 @@ export default function BookingPage() {
       />
 
       <section aria-label="Appointment Booking Wizard" className="bg-[#090909]">
-        <Suspense fallback={<BookingWizardFallback />}>
-          <BookingWizard />
-        </Suspense>
+        {policy.publicBookingEnabled ? (
+          <Suspense fallback={<BookingWizardFallback />}>
+            <BookingWizard allowedServiceSlugs={[...policy.serviceSlugs]} demoMode />
+          </Suspense>
+        ) : (
+          <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6">
+            <div className="border border-[#292929] bg-[#141414] p-10 text-center">
+              <h2 className="font-display text-3xl font-extrabold uppercase">
+                Online booking is currently unavailable
+              </h2>
+              <p className="mt-3 text-[#A3A3A3]">
+                Demo booking must be explicitly enabled on an approved private preview.
+              </p>
+            </div>
+          </div>
+        )}
       </section>
     </>
   );

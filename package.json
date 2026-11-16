@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint",
     "test": "vitest run",
-    "test:integration": "vitest run --config vitest.integration.config.mts"
+    "test:integration": "vitest run --config vitest.integration.config.mts",
+    "email:test": "node scripts/send-resend-test-email.mjs"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",
