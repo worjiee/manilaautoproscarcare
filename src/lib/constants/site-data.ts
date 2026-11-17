@@ -464,6 +464,72 @@ export const SERVICE_CATEGORIES: ServiceCategory[] = [
   },
 ];
 
+/**
+ * Development-only booking choices for the protected client-demo deployment.
+ * These are deliberately excluded from SERVICE_CATEGORIES so normal public
+ * service pages and production booking choices remain unchanged.
+ */
+export const STAGING_DEMO_SERVICE_CATEGORIES: ServiceCategory[] = [
+  {
+    slug: "demo-car-care-staging",
+    title: "[DEMO] Car Care",
+    kicker: "DEMO // CAR CARE",
+    tagline: "Development-only booking flow for client review.",
+    summary:
+      "A private staging service used to demonstrate availability, manual approval, cancellation, and rescheduling.",
+    description: [
+      "This is a development-only demonstration and is not an approved Manila Auto Pros service or operating setting.",
+    ],
+    seoDescription: "Private development demonstration service.",
+    vehicleTypes: ["Car"],
+    benefits: ["Manual approval demonstration", "Isolated development records"],
+    process: [STANDARD_CONSULT_STEP, STANDARD_HANDOVER_STEP],
+    relatedSlugs: [],
+    image: {
+      src: "/images/placeholders/service-detailing.svg",
+      alt: "Development placeholder for the demo car-care booking service",
+      isPlaceholder: true,
+    },
+    items: [
+      {
+        id: "demo-car-care-request-staging-v1",
+        name: "[DEMO] Car Care Request",
+        shortDescription:
+          "90-minute development appointment with a 30-minute resource buffer and manual confirmation.",
+      },
+    ],
+  },
+  {
+    slug: "demo-motorcycle-express-staging",
+    title: "[DEMO] Motorcycle Care",
+    kicker: "DEMO // MOTORCYCLE CARE",
+    tagline: "Development-only automatic-confirmation booking flow.",
+    summary:
+      "A private staging service used to demonstrate motorcycle availability, automatic confirmation, cancellation, and rescheduling.",
+    description: [
+      "This is a development-only demonstration and is not an approved Manila Auto Pros service or operating setting.",
+    ],
+    seoDescription: "Private development demonstration service.",
+    vehicleTypes: ["Motorcycle"],
+    benefits: ["Automatic confirmation demonstration", "Isolated development records"],
+    process: [STANDARD_CONSULT_STEP, STANDARD_HANDOVER_STEP],
+    relatedSlugs: [],
+    image: {
+      src: "/images/placeholders/service-moto.svg",
+      alt: "Development placeholder for the demo motorcycle booking service",
+      isPlaceholder: true,
+    },
+    items: [
+      {
+        id: "demo-motorcycle-express-staging-v1",
+        name: "[DEMO] Motorcycle Express",
+        shortDescription:
+          "60-minute development appointment with a 30-minute resource buffer and automatic confirmation.",
+      },
+    ],
+  },
+];
+
 export function getServiceBySlug(slug: string): ServiceCategory | undefined {
   return SERVICE_CATEGORIES.find((service) => service.slug === slug);
 }

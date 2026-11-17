@@ -29,7 +29,7 @@ import {
 import {
   BRAND_CONFIG,
   SERVICE_CATEGORIES,
-  getServiceBySlug,
+  STAGING_DEMO_SERVICE_CATEGORIES,
   type VehicleType,
 } from "@/lib/constants/site-data";
 import {
@@ -71,10 +71,15 @@ export function BookingWizard({
 }) {
   const searchParams = useSearchParams();
   const stepContainerRef = useRef<HTMLDivElement>(null);
+  const bookingCatalog = demoMode
+    ? STAGING_DEMO_SERVICE_CATEGORIES
+    : SERVICE_CATEGORIES;
 
   // Initialize from URL query parameters if valid
   const initialServiceSlug = searchParams.get("service") ?? "";
-  const requestedInitialService = getServiceBySlug(initialServiceSlug);
+  const requestedInitialService = bookingCatalog.find(
+    (service) => service.slug === initialServiceSlug
+  );
   const matchedInitialService = requestedInitialService?.items.some((item) =>
     allowedServiceSlugs?.includes(item.id) ?? true
   )
@@ -193,10 +198,10 @@ export function BookingWizard({
 
   const availableCategories = useMemo(() => {
     const categories = draft.vehicleType
-      ? SERVICE_CATEGORIES.filter((cat) =>
+      ? bookingCatalog.filter((cat) =>
           cat.vehicleTypes.includes(draft.vehicleType as VehicleType)
         )
-      : SERVICE_CATEGORIES;
+      : bookingCatalog;
     if (!allowedServiceSlugs) return categories;
     return categories
       .map((category) => ({
@@ -204,11 +209,14 @@ export function BookingWizard({
         items: category.items.filter((item) => allowedServiceSlugs.includes(item.id)),
       }))
       .filter((category) => category.items.length > 0);
-  }, [allowedServiceSlugs, draft.vehicleType]);
+  }, [allowedServiceSlugs, bookingCatalog, draft.vehicleType]);
 
   const selectedCategory = useMemo(
-    () => getServiceBySlug(draft.serviceCategorySlug),
-    [draft.serviceCategorySlug]
+    () =>
+      bookingCatalog.find(
+        (service) => service.slug === draft.serviceCategorySlug
+      ),
+    [bookingCatalog, draft.serviceCategorySlug]
   );
 
   const selectedOption = useMemo(
@@ -819,7 +827,7 @@ export function BookingWizard({
                         const prevType = draft.vehicleType;
                         updateField("vehicleType", type);
                         if (prevType !== type) {
-                          const firstMatchingCat = SERVICE_CATEGORIES.find(
+                          const firstMatchingCat = bookingCatalog.find(
                             (c) => c.vehicleTypes.includes(type)
                           );
                           updateField(
