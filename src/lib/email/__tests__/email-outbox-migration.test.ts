@@ -2,28 +2,28 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
+const normalizeLineEndings = (value: string) => value.replace(/\r\n?/g, "\n");
+
 const migrationPath = resolve(
   process.cwd(),
   "supabase/migrations/20261116000001_phase5_email_outbox.sql"
 );
-const sql = readFileSync(migrationPath, "utf8");
+const sql = normalizeLineEndings(readFileSync(migrationPath, "utf8"));
 
 const schedulingPrivilegesMigrationPath = resolve(
   process.cwd(),
   "supabase/migrations/20261115000001_harden_public_scheduling_table_permissions.sql"
 );
-const schedulingPrivilegesSql = readFileSync(
-  schedulingPrivilegesMigrationPath,
-  "utf8"
+const schedulingPrivilegesSql = normalizeLineEndings(
+  readFileSync(schedulingPrivilegesMigrationPath, "utf8")
 );
 
 const digestCompatibilityMigrationPath = resolve(
   process.cwd(),
   "supabase/migrations/20261116000002_fix_email_digest_schema.sql"
 );
-const digestCompatibilitySql = readFileSync(
-  digestCompatibilityMigrationPath,
-  "utf8"
+const digestCompatibilitySql = normalizeLineEndings(
+  readFileSync(digestCompatibilityMigrationPath, "utf8")
 );
 
 describe("Phase 5.1 outbox migration security", () => {
